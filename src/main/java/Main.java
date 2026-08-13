@@ -1,9 +1,9 @@
 package com.bot;
 
 import org.geysermc.mcprotocollib.network.Session;
-import org.geysermc.mcprotocollib.network.tcp.TcpClientSession;
+import org.geysermc.mcprotocollib.network.session.TcpClientSession;
+import org.geysermc.mcprotocollib.network.packet.Packet;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
-import org.geysermc.mcprotocollib.network.event.session.PacketReceivedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
@@ -11,7 +11,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.Serverbound
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
-import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickType;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 
@@ -43,17 +43,14 @@ public class Main {
                 System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
-                
-                // W 1.21 używamy bezpośrednio TcpClientSession zamiast usuniętej klasy Client
-                Session session = new TcpClientSession(targetHost, targetPort, protocol);
+                TcpClientSession session = new TcpClientSession(targetHost, targetPort, protocol);
 
                 activeContainerId = -1;
 
                 session.addListener(new SessionAdapter() {
                     @Override
-                    public void packetReceived(PacketReceivedEvent event) {
+                    public void packetReceived(Session session, Packet packet) {
                         try {
-                            Object packet = event.getPacket();
                             String packetName = packet.getClass().getSimpleName();
 
                             // 1. Wykrywanie otwarcia okna (menu / kompas)
@@ -79,7 +76,6 @@ public class Main {
                                                 if (itemStr.contains("anarchia") || itemStr.contains("anarchiasmp")) {
                                                     System.out.println("[BOT] [GUI] Znaleziono 'AnarchiaSMP' w slocie numer " + slotIndex + "!");
                                                     
-                                                    // Klikamy w znaleziony slot
                                                     clickSlot(session, activeContainerId, slotIndex, item);
                                                     
                                                     activeContainerId = -1;
@@ -105,7 +101,7 @@ public class Main {
 
                 startBotSequence(session);
 
-                while (session != null && session.isConnected()) {
+                while (session.isConnected()) {
                     Thread.sleep(1000);
                 }
 
@@ -120,13 +116,13 @@ public class Main {
         }
     }
 
-    private static void startBotSequence(Session session) {
+    private static void startBotSequence(TcpClientSession session) {
         new Thread(() -> {
             try {
                 System.out.println("[BOT] Czekam 4 sekundy na załadowanie świata...");
                 Thread.sleep(4000);
 
-                if (session == null || !session.isConnected()) return;
+                if (!session.isConnected()) return;
 
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
@@ -134,25 +130,24 @@ public class Main {
                 System.out.println("[BOT] Czekam 4 sekundy po zalogowaniu na odblokowanie ekwipunku...");
                 Thread.sleep(4000);
 
-                if (session == null || !session.isConnected()) return;
+                if (!session.isConnected()) return;
 
                 System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
                 double x = 0, y = 64, z = 0;
 
-                // Konstruktor w 1.21: (double x, double y, double z, float yaw, float pitch, boolean onGround)
-                session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, -30.0f, 0.0f, true));
+                // Poprawione dla 1.21: (onGround, horizontalCollision, x, y, z, yaw, pitch)
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, -30.0f, 0.0f));
                 Thread.sleep(500);
-                session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, 30.0f, 0.0f, true));
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
                 Thread.sleep(500);
 
                 System.out.println("[BOT] Idę do przodu...");
                 for (int i = 0; i < 6; i++) {
                     z += 0.5;
-                    session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, 0.0f, 0.0f, true));
+                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
                     Thread.sleep(500);
                 }
 
-                // Konstruktor w 1.21 wymaga obrotu głowy (Hand, sequence, yaw, pitch)
                 System.out.println("[BOT] Używam kompasu w dłoni...");
                 session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
 
@@ -164,15 +159,14 @@ public class Main {
         }).start();
     }
 
-    private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
+    private static void clickSlot(TcpClientSession session, int containerId, int slotIndex, Object clickedItem) {
         try {
-            // W 1.21 dodano wymóg przekazania mapy slotów (ostatni parametr)
             ServerboundContainerClickPacket packet = new ServerboundContainerClickPacket(
                 containerId, 
                 0, 
                 slotIndex, 
                 0, 
-                ClickType.PICKUP, 
+                ContainerActionType.CLICK, 
                 (ItemStack) clickedItem, 
                 new Int2ObjectOpenHashMap<>()
             );
