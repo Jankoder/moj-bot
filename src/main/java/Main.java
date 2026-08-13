@@ -284,36 +284,24 @@ public class Main {
     }
 
     private static Session createSession(String host, int port, MinecraftProtocol protocol) throws Exception {
-        String[] candidateClasses = new String[] {
-            "org.geysermc.mcprotocollib.network.session.ClientSession",
-            "org.geysermc.mcprotocollib.network.session.TcpClientSession",
-            "org.geysermc.mcprotocollib.network.session.TcpSession",
-            "org.geysermc.mcprotocollib.network.client.ClientSession",
-            "org.geysermc.mcprotocollib.network.client.TcpClientSession",
-            "org.geysermc.mcprotocollib.network.tcp.TcpClientSession",
-            "org.geysermc.mcprotocollib.network.tcp.TcpSession",
-            "org.geysermc.mcprotocollib.network.TcpClientSession",
-            "org.geysermc.mcprotocollib.network.ClientSession",
-            "org.geysermc.mcprotocollib.network.SessionClient"
-        };
-
-        for (String className : candidateClasses) {
-            Session session = tryInstantiateSession(className, host, port, protocol);
-            if (session != null) {
-                System.out.println("[BOT] Utworzono sesję z klasy: " + className);
-                return session;
-            }
-        }
-
         System.out.println("[BOT] Szukam odpowiedniej klasy w pliku JAR...");
         List<Class<?>> classes = scanMcProtocolLibClasses();
-        System.out.println("[BOT] Przeszukano " + classes.size() + " klas sesji.");
+        System.out.println("[BOT] Przeszukano " + classes.size() + " klas związanych z sesją.");
+
+        // Priority order: ClientSession / TcpClientSession / TcpSession
+        classes.sort((c1, c2) -> {
+            String n1 = c1.getSimpleName();
+            String n2 = c2.getSimpleName();
+            if (n1.contains("ClientSession")) return -1;
+            if (n2.contains("ClientSession")) return 1;
+            return n1.compareTo(n2);
+        });
 
         for (Class<?> clazz : classes) {
             if (!clazz.isInterface() && !Modifier.isAbstract(clazz.getModifiers())) {
                 Session session = tryInstantiateSessionClass(clazz, host, port, protocol);
                 if (session != null) {
-                    System.out.println("[BOT] Utworzono sesję z wykrytej klasy: " + clazz.getName());
+                    System.out.println("[BOT] Utworzono sesję z klasy: " + clazz.getName());
                     return session;
                 }
             }
@@ -322,36 +310,73 @@ public class Main {
         throw new IllegalStateException("Nie odnaleziono odpowiedniej klasy sesji w bibliotece MCProtocolLib.");
     }
 
-    private static Session tryInstantiateSession(String className, String host, int port, MinecraftProtocol protocol) {
-        try {
-            Class<?> clazz = Class.forName(className);
-            return tryInstantiateSessionClass(clazz, host, port, protocol);
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
     private static Session tryInstantiateSessionClass(Class<?> clazz, String host, int port, MinecraftProtocol protocol) {
-        try {
-            for (Constructor<?> cons : clazz.getConstructors()) {
-                Class<?>[] types = cons.getParameterTypes();
-                if (types.length == 3) {
-                    if (types[0] == String.class && (types[1] == int.class || types[1] == Integer.class)) {
-                        try {
-                            Object obj = cons.newInstance(host, port, protocol);
-                            if (obj instanceof Session) return (Session) obj;
-                        } catch (Throwable ignored) {}
-                    }
-                } else if (types.length == 2) {
-                    if (SocketAddress.class.isAssignableFrom(types[0]) || InetSocketAddress.class.isAssignableFrom(types[0])) {
-                        try {
-                            Object obj = cons.newInstance(new InetSocketAddress(host, port), protocol);
-                            if (obj instanceof Session) return (Session) obj;
-                        } catch (Throwable ignored) {}
-                    }
+        // Try Constructors
+        for (Constructor<?> cons : clazz.getConstructors()) {
+            Class<?>[] types = cons.getParameterTypes();
+            Object[] args = new Object[types.length];
+
+            for (int i = 0; i < types.length; i++) {
+                Class<?> t = types[i];
+                if (t == String.class) {
+                    args[i] = host;
+                } else if (t == int.class || t == Integer.class) {
+                    args[i] = port;
+                } else if (t.isAssignableFrom(protocol.getClass()) || t.getName().contains("Protocol")) {
+                    args[i] = protocol;
+                } else if (SocketAddress.class.isAssignableFrom(t) || InetSocketAddress.class.isAssignableFrom(t)) {
+                    args[i] = new InetSocketAddress(host, port);
+                } else if (t == boolean.class || t == Boolean.class) {
+                    args[i] = false;
+                } else if (t.isPrimitive()) {
+                    if (t == long.class) args[i] = 0L;
+                    else if (t == float.class) args[i] = 0.0f;
+                    else if (t == double.class) args[i] = 0.0d;
+                    else args[i] = 0;
+                } else {
+                    args[i] = null;
                 }
             }
-        } catch (Throwable ignored) {}
+
+            try {
+                cons.setAccessible(true);
+                Object obj = cons.newInstance(args);
+                if (obj instanceof Session) {
+                    return (Session) obj;
+                }
+            } catch (Throwable t) {
+                // Ignore exception and try next constructor/class
+            }
+        }
+
+        // Try Static Factory Methods
+        for (Method m : clazz.getDeclaredMethods()) {
+            if (Modifier.isStatic(m.getModifiers()) && Session.class.isAssignableFrom(m.getReturnType())) {
+                Class<?>[] types = m.getParameterTypes();
+                Object[] args = new Object[types.length];
+
+                for (int i = 0; i < types.length; i++) {
+                    Class<?> t = types[i];
+                    if (t == String.class) args[i] = host;
+                    else if (t == int.class || t == Integer.class) args[i] = port;
+                    else if (t.isAssignableFrom(protocol.getClass()) || t.getName().contains("Protocol")) args[i] = protocol;
+                    else if (SocketAddress.class.isAssignableFrom(t) || InetSocketAddress.class.isAssignableFrom(t)) args[i] = new InetSocketAddress(host, port);
+                    else if (t == boolean.class || t == Boolean.class) args[i] = false;
+                    else args[i] = null;
+                }
+
+                try {
+                    m.setAccessible(true);
+                    Object obj = m.invoke(null, args);
+                    if (obj instanceof Session) {
+                        return (Session) obj;
+                    }
+                } catch (Throwable t) {
+                    // Ignore exception
+                }
+            }
+        }
+
         return null;
     }
 
