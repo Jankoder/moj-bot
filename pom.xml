@@ -14,21 +14,18 @@
     </properties>
 
     <repositories>
-        <!-- Oficjalne repozytorium Geyser, z którego pobierany jest MCProtocolLib -->
+        <!-- Archiwalne repozytorium z czasów, gdy właścicielem był steveice10 -->
         <repository>
-            <id>opencollab-releases</id>
-            <url>https://repo.opencollab.dev/maven-releases/</url>
-        </repository>
-        <repository>
-            <id>opencollab-snapshots</id>
-            <url>https://repo.opencollab.dev/maven-snapshots/</url>
+            <id>opencollab-main</id>
+            <url>https://repo.opencollab.dev/main/</url>
         </repository>
     </repositories>
 
     <dependencies>
+        <!-- PRAWIDŁOWY artefakt dla wersji 1.19.4 -->
         <dependency>
-            <groupId>org.geysermc.mcprotocollib</groupId>
-            <artifactId>protocol</artifactId>
+            <groupId>com.github.steveice10</groupId>
+            <artifactId>mcprotocollib</artifactId>
             <version>1.19.4-1</version>
         </dependency>
     </dependencies>
