@@ -292,41 +292,61 @@ public class Main {
     }
 
     private static void performMovementVerification(Session session) {
-        System.out.println("[BOT] [RUCH] Rozpoczynam naturalną, chaotyczną weryfikację ruchu...");
-        float targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-180f, 180f);
-        float targetPitch = ThreadLocalRandom.current().nextFloat(-10f, 15f);
+        System.out.println("[BOT] [RUCH] Uruchamiam zaawansowaną emulację gracza Vanilla...");
+        float targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-120f, 120f);
+        float targetPitch = ThreadLocalRandom.current().nextFloat(-5f, 10f);
 
-        for (int i = 0; i < 200; i++) {
-            if (!session.isConnected()) {
-                isVerifying = false;
-                return;
+        try {
+            // Klasa pakietu samego obrotu głowy (wymagana przez zaawansowane anticheaty)
+            Class<?> rotClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerRotPacket");
+            Constructor<?> rotCons = null;
+            for (Constructor<?> c : rotClass.getConstructors()) {
+                if (c.getParameterCount() == 3) { rotCons = c; break; }
             }
 
-            if (i % 30 == 0) {
-                targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-90f, 90f);
-                targetPitch = ThreadLocalRandom.current().nextFloat(-15f, 15f);
+            for (int i = 0; i < 200; i++) {
+                if (!session.isConnected()) { isVerifying = false; return; }
+
+                // Co 25 ticków drastyczna zmiana kierunku patrzenia (symulacja rozglądania się człowieka)
+                if (i % 25 == 0) {
+                    targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-90f, 90f);
+                    targetPitch = ThreadLocalRandom.current().nextFloat(-10f, 10f);
+                }
+
+                // Wygładzanie ruchu myszki (interpolacja)
+                currentYaw += (targetYaw - currentYaw) * 0.2f;
+                currentPitch += (targetPitch - currentPitch) * 0.2f;
+
+                // Naturalny Jitter (drżenie rąk na myszce)
+                currentYaw += ThreadLocalRandom.current().nextFloat(-0.3f, 0.3f);
+                currentPitch += ThreadLocalRandom.current().nextFloat(-0.1f, 0.1f);
+
+                // Wysyłanie pakietu samego obrotu głowy (Anticheat sprawdza czy ruszasz myszką!)
+                if (rotCons != null && i % 2 == 0) {
+                    session.send((Packet) rotCons.newInstance(currentYaw, currentPitch, true));
+                }
+
+                // Obliczanie wektora chodu z losową prędkością
+                double currentSpeed = ThreadLocalRandom.current().nextDouble(0.08, 0.12);
+                double rad = Math.toRadians(currentYaw);
+                currentX -= Math.sin(rad) * currentSpeed;
+                currentZ += Math.cos(rad) * currentSpeed;
+
+                // Losowe machnięcie ręką raz na jakiś czas (symulacja klikania LPM/PPM podczas chodu)
+                if (ThreadLocalRandom.current().nextInt(100) < 8) {
+                    session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+                }
+
+                // Wysyłanie pełnego pakietu pozycji i obrotu
+                sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
+
+                // Losowy lag sieciowy (jitter połączenia)
+                Thread.sleep(ThreadLocalRandom.current().nextInt(47, 54));
             }
-
-            currentYaw += (targetYaw - currentYaw) * 0.15f;
-            currentPitch += (targetPitch - currentPitch) * 0.15f;
-
-            currentYaw += ThreadLocalRandom.current().nextFloat(-0.4f, 0.4f);
-            currentPitch += ThreadLocalRandom.current().nextFloat(-0.2f, 0.2f);
-
-            double currentSpeed = ThreadLocalRandom.current().nextDouble(0.09, 0.13);
-            double rad = Math.toRadians(currentYaw);
-            currentX -= Math.sin(rad) * currentSpeed;
-            currentZ += Math.cos(rad) * currentSpeed;
-
-            sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
-
-            try {
-                int randomSleep = ThreadLocalRandom.current().nextInt(46, 55);
-                Thread.sleep(randomSleep);
-            } catch (InterruptedException e) {
-                break;
-            }
+        } catch (Exception e) {
+            System.err.println("[BOT] Błąd podczas emulacji chodu: " + e.getMessage());
         }
+
         System.out.println("[BOT] [RUCH] Zakończono sekwencję weryfikacji!");
         isVerifying = false;
     }
