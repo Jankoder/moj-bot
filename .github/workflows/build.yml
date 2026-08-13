@@ -22,7 +22,7 @@ jobs:
         javac Main.java
         echo "Main-Class: Main" > manifest.txt
         echo "" >> manifest.txt
-        jar cvfm server.jar manifest.txt Main.class
+        jar cvfm server.jar manifest.txt *.class
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
