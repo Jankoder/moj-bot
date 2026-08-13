@@ -1,15 +1,12 @@
- package com.bot;
+package com.bot;
 
+import org.geysermc.mcprotocollib.network.Client;
 import org.geysermc.mcprotocollib.network.Session;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
-import org.geysermc.mcprotocollib.network.event.session.PacketReceivedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
-import org.geysermc.mcprotocollib.network.tcp.TcpClientSession;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
-import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 
 import java.util.Hashtable;
 import javax.naming.directory.Attributes;
@@ -26,7 +23,7 @@ public class Main {
         System.out.println("=================================");
         System.out.println("   AUTORSKI BOT AFK 1.21.4       ");
         System.out.println("   (MCProtocolLib + Maven)       ");
-        System.out.println("=================================");
+        System.=================================";
 
         while (true) {
             try {
@@ -37,22 +34,9 @@ public class Main {
                 System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
-                Session client = new TcpClientSession(targetHost, targetPort, protocol);
+                Client client = new Client(targetHost, targetPort, protocol);
 
-                client.addListener(new SessionAdapter() {
-                    private boolean loggedIn = false;
-
-                    @Override
-                    public void packetReceived(PacketReceivedEvent event) {
-                        String packetName = event.getPacket().getClass().getSimpleName();
-
-                        if ((packetName.contains("Login") || packetName.contains("Join") || packetName.contains("PlayerPosition")) && !loggedIn) {
-                            loggedIn = true;
-                            System.out.println("[BOT] [OK] Połączono z serwerem!");
-                            executeBotSequence(client);
-                        }
-                    }
-
+                client.getSession().addListener(new SessionAdapter() {
                     @Override
                     public void disconnected(DisconnectedEvent event) {
                         System.out.println("[BOT] Rozłączono z serwerem. Powód: " + event.getReason());
@@ -60,8 +44,12 @@ public class Main {
                 });
 
                 client.connect();
+                System.out.println("[BOT] [OK] Wysłano żądanie połączenia...");
 
-                while (client.isConnected()) {
+                // Uruchomienie sekwencji bota w osobnym wątku
+                startBotSequence(client.getSession());
+
+                while (client.getSession() != null && client.getSession().isConnected()) {
                     Thread.sleep(1000);
                 }
 
@@ -76,16 +64,24 @@ public class Main {
         }
     }
 
-    private static void executeBotSequence(Session session) {
+    private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
+                // Czekamy 4 sekundy na pełne załadowanie i wejście na serwer
+                System.out.println("[BOT] Czekam na załadowanie świata...");
+                Thread.sleep(4000);
+
+                if (session == null || !session.isConnected()) {
+                    System.out.println("[BOT] Sesja nie jest aktywna, przerywam sekwencję.");
+                    return;
+                }
+
                 // Krok 1: Wpisanie komendy /login
-                Thread.sleep(2000);
-                System.out.println("[BOT] Wysyłam komendę: /login " + PASSWORD);
+                System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
                 // Krok 2: Weryfikacja ruchowa (onGround, horizontalCollision, x, y, z, yaw, pitch)
-                Thread.sleep(2500);
+                Thread.sleep(3000);
                 System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
                 
                 double x = 0, y = 64, z = 0;
@@ -95,23 +91,18 @@ public class Main {
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
                 Thread.sleep(500);
 
-                System.out.println("[BOT] Idę do przodu przez 6 sekund...");
-                for (int i = 0; i < 12; i++) {
+                System.out.println("[BOT] Idę do przodu...");
+                for (int i = 0; i < 6; i++) {
                     z += 0.5;
                     session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
                     Thread.sleep(500);
                 }
 
-                // Krok 3: Użycie kompasu (Hand, sequence)
-                System.out.println("[BOT] Używam kompasu w dłoni...");
-                session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0));
-                
-                // Krok 4: Wybór trybu AnarchiaSMP
-                Thread.sleep(1500);
-                System.out.println("[BOT] Dołączam na tryb AnarchiaSMP...");
+                // Krok 3: Wybór trybu AnarchiaSMP
+                System.out.println("[BOT] Dołączam na tryb AnarchiaSMP komendą /anarchia...");
                 session.send(new ServerboundChatCommandPacket("anarchia"));
 
-                System.out.println("[BOT] Sekwencja zakończona! Bot dołączył na AnarchiaSMP i utrzymuje AFK.");
+                System.out.println("[BOT] Sekwencja zakończona! Bot utrzymuje stan AFK.");
 
             } catch (Exception e) {
                 System.err.println("[BOT] Błąd podczas wykonywania sekwencji: " + e.getMessage());
