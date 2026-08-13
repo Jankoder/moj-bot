@@ -14,17 +14,22 @@
     </properties>
 
     <repositories>
+        <!-- Oficjalne repozytorium Geyser, z którego pobierany jest MCProtocolLib -->
         <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
+            <id>opencollab-releases</id>
+            <url>https://repo.opencollab.dev/maven-releases/</url>
+        </repository>
+        <repository>
+            <id>opencollab-snapshots</id>
+            <url>https://repo.opencollab.dev/maven-snapshots/</url>
         </repository>
     </repositories>
 
     <dependencies>
         <dependency>
-            <groupId>com.github.GeyserMC.MCProtocolLib</groupId>
+            <groupId>org.geysermc.mcprotocollib</groupId>
             <artifactId>protocol</artifactId>
-            <version>8eb14bd03c</version>
+            <version>1.19.4-1</version>
         </dependency>
     </dependencies>
 
