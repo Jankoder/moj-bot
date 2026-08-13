@@ -13,6 +13,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.S
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.Hashtable;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
@@ -228,7 +229,7 @@ public class Main {
                 }
             } catch (ClassNotFoundException ignored) {}
 
-            // 4. Utwórz pakiety ServerboundContainerClickPacket
+            // 4. Utwórz pakiet ServerboundContainerClickPacket
             Object packet = null;
             Constructor<?>[] constructors = ServerboundContainerClickPacket.class.getConstructors();
             for (Constructor<?> cons : constructors) {
@@ -282,15 +283,20 @@ public class Main {
     }
 
     private static Session createSession(String host, int port, MinecraftProtocol protocol) throws Exception {
+        // Lista prawdopodobnych nazw klas sesji
         String[] candidateClasses = new String[] {
-            "org.geysermc.mcprotocollib.network.tcp.TcpClientSession",
-            "org.geysermc.mcprotocollib.network.client.TcpClientSession",
-            "org.geysermc.mcprotocollib.network.client.ClientSession",
-            "org.geysermc.mcprotocollib.network.session.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.session.TcpSession",
+            "org.geysermc.mcprotocollib.network.tcp.TcpSession",
             "org.geysermc.mcprotocollib.network.session.ClientSession",
+            "org.geysermc.mcprotocollib.network.client.ClientSession",
+            "org.geysermc.mcprotocollib.network.client.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.tcp.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.session.TcpClientSession",
             "org.geysermc.mcprotocollib.network.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.TcpSession",
             "org.geysermc.mcprotocollib.network.ClientSession",
-            "org.geysermc.mcprotocollib.network.SessionClient"
+            "org.geysermc.mcprotocollib.protocol.ClientSession",
+            "org.geysermc.mcprotocollib.protocol.TcpClientSession"
         };
 
         for (String className : candidateClasses) {
@@ -305,6 +311,35 @@ public class Main {
                 }
             } catch (ClassNotFoundException ignored) {}
         }
+
+        // Skanowanie biblioteki JAR, jeśli nazwy statyczne zawiodą
+        java.net.URL location = Session.class.getProtectionDomain().getCodeSource().getLocation();
+        if (location != null) {
+            try (java.util.jar.JarFile jarFile = new java.util.jar.JarFile(new java.io.File(location.toURI()))) {
+                java.util.Enumeration<java.util.jar.JarEntry> entries = jarFile.entries();
+                while (entries.hasMoreElements()) {
+                    java.util.jar.JarEntry entry = entries.nextElement();
+                    String name = entry.getName();
+                    if (name.endsWith(".class") && name.startsWith("org/geysermc/mcprotocollib/")) {
+                        String className = name.replace('/', '.').substring(0, name.length() - 6);
+                        try {
+                            Class<?> clazz = Class.forName(className);
+                            if (Session.class.isAssignableFrom(clazz) && !clazz.isInterface() && !Modifier.isAbstract(clazz.getModifiers())) {
+                                for (Constructor<?> cons : clazz.getConstructors()) {
+                                    if (cons.getParameterCount() == 3) {
+                                        System.out.println("[BOT] Wykryto klasę sesji: " + className);
+                                        return (Session) cons.newInstance(host, port, protocol);
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignored) {}
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("[BOT] Błąd podczas skanowania JAR: " + e.getMessage());
+            }
+        }
+
         throw new IllegalStateException("Nie odnaleziono odpowiedniej klasy sesji w bibliotece MCProtocolLib.");
     }
 
