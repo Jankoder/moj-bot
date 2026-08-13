@@ -1,7 +1,7 @@
 package com.bot;
 
 import org.geysermc.mcprotocollib.network.Session;
-import org.geysermc.mcprotocollib.network.session.ClientSession;
+import org.geysermc.mcprotocollib.network.tcp.TcpClientSession;
 import org.geysermc.mcprotocollib.network.packet.Packet;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
@@ -12,7 +12,10 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.DefaultContainerAction;
 import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.data.game.item.HashedStack;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 
 import java.util.Hashtable;
@@ -43,7 +46,7 @@ public class Main {
                 System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
-                Session session = new ClientSession(targetHost, targetPort, protocol);
+                TcpClientSession session = new TcpClientSession(targetHost, targetPort, protocol);
 
                 activeContainerId = -1;
 
@@ -116,7 +119,7 @@ public class Main {
         }
     }
 
-    private static void startBotSequence(Session session) {
+    private static void startBotSequence(TcpClientSession session) {
         new Thread(() -> {
             try {
                 System.out.println("[BOT] Czekam 4 sekundy na załadowanie świata...");
@@ -158,16 +161,21 @@ public class Main {
         }).start();
     }
 
-    private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
+    private static void clickSlot(TcpClientSession session, int containerId, int slotIndex, Object clickedItem) {
         try {
+            Int2ObjectMap<HashedStack> changedSlots = new Int2ObjectOpenHashMap<>();
+            HashedStack hashedItem = (clickedItem instanceof ItemStack) 
+                    ? HashedStack.of((ItemStack) clickedItem) 
+                    : HashedStack.EMPTY;
+
             ServerboundContainerClickPacket packet = new ServerboundContainerClickPacket(
                 containerId, 
                 0, 
                 slotIndex, 
-                0, 
-                ContainerActionType.CLICK_ITEM, 
-                (ItemStack) clickedItem, 
-                new Int2ObjectOpenHashMap<>()
+                ContainerActionType.PICKUP, 
+                DefaultContainerAction.LEFT_CLICK, 
+                hashedItem, 
+                changedSlots
             );
             session.send(packet);
             System.out.println("[BOT] Wysłano pakiet kliknięcia w slot " + slotIndex);
