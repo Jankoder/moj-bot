@@ -10,6 +10,7 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.Serverbound
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 
 import java.lang.reflect.Constructor;
@@ -64,9 +65,14 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // Podgląd pakietów w konsoli podczas oczekiwania na menu
+                            // Podgląd pakietów w konsoli + wyciąganie wiadomości z czatu
                             if (waitingForGui) {
-                                System.out.println("[BOT] [ODBIEG-PAKIET] -> " + packetName);
+                                if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
+                                    String chatText = extractChatText(packet);
+                                    System.out.println("[BOT] [CZAT SERWERA] -> " + chatText);
+                                } else {
+                                    System.out.println("[BOT] [ODBIEG-PAKIET] -> " + packetName);
+                                }
                             }
 
                             // 1. Wykrywanie otwarcia okna (menu / kompas)
@@ -169,8 +175,11 @@ public class Main {
                 session.send(new ServerboundSetCarriedItemPacket(4));
                 Thread.sleep(500);
 
-                System.out.println("[BOT] Używam kompasu w dłoni...");
+                System.out.println("[BOT] Używam kompasu w dłoni (z zamachem ręki)...");
                 waitingForGui = true;
+                
+                // Machnięcie ręką + Użycie przedmiotu
+                session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
                 session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
 
                 System.out.println("[BOT] Kompas został użyty. Oczekuję na menu serwera...");
@@ -179,6 +188,17 @@ public class Main {
                 System.err.println("[BOT] Błąd sekwencji: " + e.getMessage());
             }
         }).start();
+    }
+
+    private static String extractChatText(Packet packet) {
+        try {
+            Method getContent = packet.getClass().getMethod("getContent");
+            Object content = getContent.invoke(packet);
+            if (content != null) {
+                return content.toString();
+            }
+        } catch (Exception ignored) {}
+        return packet.toString();
     }
 
     private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
