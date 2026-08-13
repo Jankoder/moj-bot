@@ -1,12 +1,12 @@
 package com.bot;
 
-import org.geysermc.mcprotocollib.network.Client;
-import org.geysermc.mcprotocollib.network.Session;
+import org.geysermc.mcprotocollib.network.session.Session;
+import org.geysermc.mcprotocollib.network.session.TcpClientSession;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
-import org.geysermc.mcprotocollib.network.event.session.PacketReceivedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.packet.Packet;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
@@ -41,15 +41,14 @@ public class Main {
                 System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
-                Client client = new Client(targetHost, targetPort, protocol);
+                TcpClientSession clientSession = new TcpClientSession(targetHost, targetPort, protocol);
 
                 activeContainerId = -1;
 
-                client.getSession().addListener(new SessionAdapter() {
+                clientSession.addListener(new SessionAdapter() {
                     @Override
-                    public void packetReceived(PacketReceivedEvent event) {
+                    public void packetReceived(Session session, Packet packet) {
                         try {
-                            Object packet = event.getPacket();
                             String packetName = packet.getClass().getSimpleName();
 
                             // 1. Wykrywanie otwarcia okna (kompas / menu)
@@ -76,7 +75,7 @@ public class Main {
                                                     System.out.println("[BOT] [GUI] Znaleziono 'AnarchiaSMP' w slocie numer " + slotIndex + "!");
                                                     
                                                     // Klikamy w znaleziony slot
-                                                    clickSlotViaPacket(client.getSession(), activeContainerId, slotIndex, item);
+                                                    clickSlotViaPacket(session, activeContainerId, slotIndex, item);
                                                     
                                                     activeContainerId = -1; // Reset, aby nie klikać wielokrotnie
                                                     break;
@@ -96,13 +95,13 @@ public class Main {
                     }
                 });
 
-                client.connect();
+                clientSession.connect();
                 System.out.println("[BOT] [OK] Wysłano żądanie połączenia...");
 
                 // Uruchomienie sekwencji bota w osobnym wątku
-                startBotSequence(client.getSession());
+                startBotSequence(clientSession);
 
-                while (client.getSession() != null && client.getSession().isConnected()) {
+                while (clientSession.isConnected()) {
                     Thread.sleep(1000);
                 }
 
@@ -186,7 +185,7 @@ public class Main {
                         } else {
                             packet = constructor.newInstance(containerId, slotIndex, 0, clickTypePickup);
                         }
-                        session.send((org.geysermc.mcprotocollib.network.packet.Packet) packet);
+                        session.send((Packet) packet);
                         System.out.println("[BOT] Wysłano pakiet kliknięcia w slot " + slotIndex);
                         return;
                     }
