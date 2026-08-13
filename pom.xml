@@ -14,10 +14,19 @@
     </properties>
 
     <repositories>
-        <!-- Oficjalne repozytorium JitPack, gdzie mieszkają stabilne wersje MCProtocolLib -->
+        <!-- JitPack dla głównej biblioteki -->
         <repository>
             <id>jitpack.io</id>
             <url>https://jitpack.io</url>
+        </repository>
+        <!-- OpenCollab dla zależności CloudburstMC oraz NukkitX -->
+        <repository>
+            <id>opencollab-releases</id>
+            <url>https://repo.opencollab.dev/maven-releases/</url>
+        </repository>
+        <repository>
+            <id>opencollab-snapshots</id>
+            <url>https://repo.opencollab.dev/maven-snapshots/</url>
         </repository>
     </repositories>
 
