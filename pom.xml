@@ -19,19 +19,16 @@
             <url>https://jitpack.io</url>
         </repository>
         <repository>
-            <id>opencollab-releases</id>
-            <url>https://repo.opencollab.dev/maven-releases/</url>
-        </repository>
-        <repository>
-            <id>opencollab-snapshots</id>
-            <url>https://repo.opencollab.dev/maven-snapshots/</url>
+            <id>opencollab-repo</id>
+            <url>https://repo.opencollab.dev/main/</url>
         </repository>
     </repositories>
 
     <dependencies>
+        <!-- Wskazujemy konkretny moduł: protocol -->
         <dependency>
-            <groupId>com.github.GeyserMC</groupId>
-            <artifactId>MCProtocolLib</artifactId>
+            <groupId>com.github.GeyserMC.MCProtocolLib</groupId>
+            <artifactId>protocol</artifactId>
             <version>master-SNAPSHOT</version>
         </dependency>
     </dependencies>
