@@ -38,6 +38,7 @@ public class Main {
 
     private static volatile int activeContainerId = -1;
     private static volatile boolean waitingForGui = false;
+    private static volatile boolean resourcePackFinished = false;
     private static volatile long lastCompassUse = 0;
 
     public static void main(String[] args) {
@@ -59,6 +60,7 @@ public class Main {
 
                 activeContainerId = -1;
                 waitingForGui = false;
+                resourcePackFinished = false;
 
                 session.addListener(new SessionAdapter() {
                     @Override
@@ -66,40 +68,42 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // 1. DYNAMICZNA OBSŁUGA PACZKI ZASOBÓW (Z PEŁNYM CYKLEM: ACCEPTED -> DOWNLOADED -> LOADED)
+                            // 1. OBSŁUGA PACZKI ZASOBÓW (ACCEPTED -> DOWNLOADED -> LOADED)
                             if (packetName.contains("ResourcePack")) {
                                 System.out.println("[BOT] [RESOURCE PACK] Wykryto żądanie paczki zasobów. Rozpoczynam sekwencję akceptacji...");
                                 handleResourcePack(session, packet);
                             }
 
-                            // 2. Podgląd czatu serwera oraz automatyczna ponowna próba kompasu
+                            // 2. CZAT & REAKCJA NA ANTY-BOT
                             if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
                                 String chatText = extractChatText(packet);
                                 if (waitingForGui) {
                                     System.out.println("[BOT] [CZAT SERWERA] -> " + chatText);
                                 }
 
-                                // Jeśli serwer twierdzi, że trwa pobieranie, ponawiamy kompas po 3 sekundach
-                                if (chatText.contains("Trwa pobieranie") && System.currentTimeMillis() - lastCompassUse > 3000) {
+                                // Jeśli serwer ponagla, a GUI nie jest otwarte – ponawiamy kompas z opóźnieniem
+                                if (chatText.contains("Trwa pobieranie") && (System.currentTimeMillis() - lastCompassUse > 4000)) {
                                     lastCompassUse = System.currentTimeMillis();
                                     new Thread(() -> {
                                         try {
-                                            System.out.println("[BOT] Serwer zgłasza pobieranie - ponawiam użycie kompasu za 3 sekundy...");
+                                            System.out.println("[BOT] Otrzymano informację o pobieraniu - czekam 3 sekundy...");
                                             Thread.sleep(3000);
-                                            useCompass(session);
+                                            if (activeContainerId == -1 && resourcePackFinished) {
+                                                useCompass(session);
+                                            }
                                         } catch (Exception ignored) {}
                                     }).start();
                                 }
                             }
 
-                            // 3. Wykrywanie otwarcia menu / okna
+                            // 3. OTRZYMANIE GUI / EKWIPUNKU
                             if (packetName.contains("OpenScreen") || packetName.contains("ContainerOpen") || packetName.contains("OpenWindow")) {
                                 Method getContainerId = packet.getClass().getMethod("getContainerId");
                                 activeContainerId = (int) getContainerId.invoke(packet);
                                 System.out.println("[BOT] [GUI] Otwarto menu ekwipunku! ID kontenera: " + activeContainerId);
                             }
 
-                            // 4. Wykrywanie zawartości okna i szukanie "AnarchiaSMP"
+                            // 4. SZUKANIE "ANARCHIA" / "SMP" W OTWRTYM GUI
                             if (packetName.contains("ContainerSetContent") || packetName.contains("WindowItems") || packetName.contains("SetContainerContent")) {
                                 if (activeContainerId != -1) {
                                     Method getContainerId = packet.getClass().getMethod("getContainerId");
@@ -113,7 +117,7 @@ public class Main {
                                             if (item != null) {
                                                 String itemStr = item.toString().toLowerCase();
                                                 if (itemStr.contains("anarchia") || itemStr.contains("anarchiasmp") || itemStr.contains("smp")) {
-                                                    System.out.println("[BOT] [GUI] Znaleziono 'AnarchiaSMP' w slocie numer " + slotIndex + "!");
+                                                    System.out.println("[BOT] [GUI] Znaleziono serwer w slocie numer " + slotIndex + "!");
                                                     
                                                     clickSlot(session, activeContainerId, slotIndex, item);
                                                     
@@ -164,13 +168,22 @@ public class Main {
 
                 if (!session.isConnected()) return;
 
+                // Wysyłamy markę klienta (minecraft:brand = vanilla)
+                sendBrandPayload(session);
+
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                System.out.println("[BOT] Czekam 10 sekund na załadowanie świata, zalogowanie i odblokowanie...");
-                Thread.sleep(10000);
+                System.out.println("[BOT] Oczekiwanie na sekwencję paczki zasobów...");
+                long startWait = System.currentTimeMillis();
+                while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 12000)) {
+                    Thread.sleep(500);
+                }
 
                 if (!session.isConnected()) return;
+
+                System.out.println("[BOT] Paczka zasobów załadowana. Odczekuję 1.5s na ustabilizowanie stanu gracza...");
+                Thread.sleep(1500);
 
                 System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
                 double x = 0, y = 64, z = 0;
@@ -180,17 +193,17 @@ public class Main {
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
                 Thread.sleep(300);
 
-                System.out.println("[BOT] Idę do przodu przez 6 sekund...");
-                for (int i = 0; i < 20; i++) {
+                System.out.println("[BOT] Idę do przodu...");
+                for (int i = 0; i < 10; i++) {
                     z += 0.2;
                     session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
                     Thread.sleep(300);
                 }
 
-                // Slot 4 = 5. okienko z kompasem
+                // Wybieramy slot 4 (5. okienko na paseku)
                 System.out.println("[BOT] Wybieram slot 4 (5. okienko z kompasem)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
-                Thread.sleep(500);
+                Thread.sleep(800);
 
                 waitingForGui = true;
                 useCompass(session);
@@ -201,8 +214,55 @@ public class Main {
         }).start();
     }
 
+    private static void sendBrandPayload(Session session) {
+        try {
+            byte[] data = new byte[] { 0x07, 'v', 'a', 'n', 'i', 'l', 'l', 'a' };
+            
+            Class<?> customPayloadClass = null;
+            try {
+                customPayloadClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundCustomPayloadPacket");
+            } catch (ClassNotFoundException ignored) {}
+
+            if (customPayloadClass != null) {
+                for (Constructor<?> cons : customPayloadClass.getConstructors()) {
+                    Class<?>[] pTypes = cons.getParameterTypes();
+                    if (pTypes.length == 2) {
+                        Object arg1 = null;
+                        if (pTypes[0] == String.class) {
+                            arg1 = "minecraft:brand";
+                        } else if (pTypes[0].getName().contains("Key") || pTypes[0].getName().contains("ResourceLocation")) {
+                            Method keyMethod = pTypes[0].getMethod("key", String.class, String.class);
+                            arg1 = keyMethod.invoke(null, "minecraft", "brand");
+                        }
+
+                        if (arg1 != null && pTypes[1] == byte[].class) {
+                            session.send((Packet) cons.newInstance(arg1, data));
+                            System.out.println("[BOT] [VERIFY] Wysłano pakiet tożsamości klienta (minecraft:brand)");
+                            return;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("[BOT] Ostrzeżenie przy wysyłaniu brandu: " + e.getMessage());
+        }
+    }
+
     private static void useCompass(Session session) {
         if (!session.isConnected()) return;
+        
+        // Zabezpieczenie przed użyciem kompasu gdy GUI jest już otwarte
+        if (activeContainerId != -1) {
+            System.out.println("[BOT] Menu jest już otwarte. Pomijam ponowne kliknięcie kompasu.");
+            return;
+        }
+
+        // Zabezpieczenie przed użyciem kompasu gdy serwer jeszcze przetwarza paczkę
+        if (!resourcePackFinished) {
+            System.out.println("[BOT] Paczka zasobów nie jest jeszcze przetworzona. Pomijam kliknięcie.");
+            return;
+        }
+
         System.out.println("[BOT] Używam kompasu w dłoni...");
         lastCompassUse = System.currentTimeMillis();
         session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
@@ -212,7 +272,8 @@ public class Main {
     private static void handleResourcePack(Session session, Packet incomingPacket) {
         new Thread(() -> {
             try {
-                // Odczytywanie UUID
+                resourcePackFinished = false;
+
                 UUID packId = null;
                 for (Method m : incomingPacket.getClass().getMethods()) {
                     if (m.getParameterCount() == 0 && m.getReturnType() == UUID.class) {
@@ -240,27 +301,32 @@ public class Main {
                     if (name.contains("SUCCESSFULLY_LOADED") || name.equals("LOADED")) loaded = constant;
                 }
 
-                // 1. Wysyłanie ACCEPTED
+                // 1. ACCEPTED
                 if (accepted != null) {
                     sendResourcePackResponse(session, packetClass, packId, accepted);
                     System.out.println("[BOT] [RESOURCE PACK] Wysłano: ACCEPTED");
                 }
 
-                Thread.sleep(500);
+                Thread.sleep(600);
 
-                // 2. Wysyłanie DOWNLOADED (wymagane od 1.20.3+)
+                // 2. DOWNLOADED
                 if (downloaded != null) {
                     sendResourcePackResponse(session, packetClass, packId, downloaded);
                     System.out.println("[BOT] [RESOURCE PACK] Wysłano: DOWNLOADED");
                 }
 
-                Thread.sleep(500);
+                Thread.sleep(600);
 
-                // 3. Wysyłanie SUCCESSFULLY_LOADED
+                // 3. SUCCESSFULLY_LOADED
                 if (loaded != null) {
                     sendResourcePackResponse(session, packetClass, packId, loaded);
                     System.out.println("[BOT] [RESOURCE PACK] Wysłano: SUCCESSFULLY_LOADED");
                 }
+
+                // Dajemy czas serwerowi na zaktualizowanie stanu gracza
+                Thread.sleep(1500);
+                resourcePackFinished = true;
+                System.out.println("[BOT] [RESOURCE PACK] Paczka przetworzona pomyślnie!");
 
             } catch (Exception e) {
                 System.err.println("[BOT] Błąd obsługi Resource Packa: " + e.getMessage());
