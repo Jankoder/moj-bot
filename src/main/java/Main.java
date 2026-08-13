@@ -65,7 +65,13 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // Podgląd pakietów w konsoli + wyciąganie wiadomości z czatu
+                            // 1. AUTOMATYCZNE ZZEWOLENIE I AKCEPTACJA PACZKI ZASOBÓW (W DOWOLNYM MOMENCIE)
+                            if (packetName.contains("ResourcePack")) {
+                                System.out.println("[BOT] [RESOURCE PACK] Otrzymano prośbę o paczkę zasobów. Automatycznie akceptuję...");
+                                handleResourcePack(session, packet);
+                            }
+
+                            // 2. Podgląd czatu serwera podczas oczekiwania na menu
                             if (waitingForGui) {
                                 if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
                                     String chatText = extractChatText(packet);
@@ -75,14 +81,14 @@ public class Main {
                                 }
                             }
 
-                            // 1. Wykrywanie otwarcia okna (menu / kompas)
+                            // 3. Wykrywanie otwarcia menu / okna
                             if (packetName.contains("OpenScreen") || packetName.contains("ContainerOpen") || packetName.contains("OpenWindow")) {
                                 Method getContainerId = packet.getClass().getMethod("getContainerId");
                                 activeContainerId = (int) getContainerId.invoke(packet);
                                 System.out.println("[BOT] [GUI] Otwarto menu ekwipunku! ID kontenera: " + activeContainerId);
                             }
 
-                            // 2. Wykrywanie zawartości okna i szukanie "AnarchiaSMP"
+                            // 4. Wykrywanie zawartości okna i szukanie "AnarchiaSMP"
                             if (packetName.contains("ContainerSetContent") || packetName.contains("WindowItems") || packetName.contains("SetContainerContent")) {
                                 if (activeContainerId != -1) {
                                     Method getContainerId = packet.getClass().getMethod("getContainerId");
@@ -142,15 +148,15 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                System.out.println("[BOT] Czekam 1 sekundę na wejście do lobby...");
-                Thread.sleep(1000);
+                System.out.println("[BOT] Czekam 2 sekundy na wejście do lobby...");
+                Thread.sleep(2000);
 
                 if (!session.isConnected()) return;
 
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                System.out.println("[BOT] Czekam 10 sekund na załadowanie świata, teleportację i odblokowanie EQ...");
+                System.out.println("[BOT] Czekam 10 sekund na załadowanie świata, zalogowanie i odblokowanie...");
                 Thread.sleep(10000);
 
                 if (!session.isConnected()) return;
@@ -163,31 +169,83 @@ public class Main {
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
                 Thread.sleep(300);
 
-                System.out.println("[BOT] Idę do przodu przez dokładnie 6 sekund...");
+                System.out.println("[BOT] Idę do przodu przez 6 sekund...");
                 for (int i = 0; i < 20; i++) {
                     z += 0.2;
                     session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
                     Thread.sleep(300);
                 }
 
-                // USTAWIONO SLOT 4 (DLA 5. OKIENKA NA EKRANIE)
+                // Slot 4 = 5. okienko z kompasem
                 System.out.println("[BOT] Wybieram slot 4 (5. okienko z kompasem)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
                 Thread.sleep(500);
 
-                System.out.println("[BOT] Używam kompasu w dłoni (z zamachem ręki)...");
+                System.out.println("[BOT] Używam kompasu w dłoni...");
                 waitingForGui = true;
-                
-                // Machnięcie ręką + Użycie przedmiotu
+
                 session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
                 session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
 
-                System.out.println("[BOT] Kompas został użyty. Oczekuję na menu serwera...");
+                System.out.println("[BOT] Kompas został użyty. Oczekuję na menu...");
 
             } catch (Exception e) {
                 System.err.println("[BOT] Błąd sekwencji: " + e.getMessage());
             }
         }).start();
+    }
+
+    private static void handleResourcePack(Session session, Packet incomingPacket) {
+        new Thread(() -> {
+            try {
+                UUID packId = null;
+                try {
+                    Method getId = incomingPacket.getClass().getMethod("getId");
+                    packId = (UUID) getId.invoke(incomingPacket);
+                } catch (Exception ignored) {}
+
+                Class<?> statusEnum = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus");
+                Object accepted = null;
+                Object loaded = null;
+
+                for (Object constant : statusEnum.getEnumConstants()) {
+                    String name = constant.toString().toUpperCase();
+                    if (name.contains("ACCEPTED")) accepted = constant;
+                    if (name.contains("SUCCESSFULLY_LOADED") || name.contains("LOADED")) loaded = constant;
+                }
+
+                Class<?> serverboundPacketClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundResourcePackPacket");
+
+                // 1. Zgłoszenie akceptacji pobierania
+                sendResourcePackResponse(session, serverboundPacketClass, packId, accepted);
+                System.out.println("[BOT] [RESOURCE PACK] Wysłąno: AKCEPTACJA DOWMACCZA PACZKI.");
+
+                Thread.sleep(400);
+
+                // 2. Zgłoszenie pomyślnego załadowania
+                sendResourcePackResponse(session, serverboundPacketClass, packId, loaded);
+                System.out.println("[BOT] [RESOURCE PACK] Wysłąno: PACZKA ZASOBÓW ZAŁADOWANA!");
+
+            } catch (Exception e) {
+                System.err.println("[BOT] Błąd automatycznej obsługi paczki zasobów: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    private static void sendResourcePackResponse(Session session, Class<?> packetClass, UUID packId, Object status) {
+        if (status == null) return;
+        for (Constructor<?> cons : packetClass.getConstructors()) {
+            try {
+                Class<?>[] types = cons.getParameterTypes();
+                if (types.length == 2 && types[0] == UUID.class) {
+                    session.send((Packet) cons.newInstance(packId, status));
+                    return;
+                } else if (types.length == 1) {
+                    session.send((Packet) cons.newInstance(status));
+                    return;
+                }
+            } catch (Exception ignored) {}
+        }
     }
 
     private static String extractChatText(Packet packet) {
