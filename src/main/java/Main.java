@@ -5,13 +5,10 @@ import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
 import org.geysermc.mcprotocollib.network.tcp.TcpClientSession;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
-import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 
-import java.util.Collections;
 import java.util.Hashtable;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
@@ -31,14 +28,12 @@ public class Main {
 
         while (true) {
             try {
-                // Rozwiązywanie ukrytego adresu SRV
                 String[] srv = resolveSrv(HOST);
                 String targetHost = srv[0];
                 int targetPort = Integer.parseInt(srv[1]);
 
                 System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
-                // Tworzenie protokołu oraz sesji
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
                 Session client = new TcpClientSession(targetHost, targetPort, protocol);
 
@@ -49,12 +44,9 @@ public class Main {
                     public void packetReceived(PacketReceivedEvent event) {
                         String packetName = event.getPacket().getClass().getSimpleName();
 
-                        // Reakcja po wejściu na serwer
                         if ((packetName.contains("Login") || packetName.contains("Join") || packetName.contains("PlayerPosition")) && !loggedIn) {
                             loggedIn = true;
                             System.out.println("[BOT] [OK] Połączono z serwerem!");
-                            
-                            // Uruchomienie pełnej sekwencji
                             executeBotSequence(client);
                         }
                     }
@@ -67,7 +59,6 @@ public class Main {
 
                 client.connect();
 
-                // Utrzymanie wątku
                 while (client.isConnected()) {
                     Thread.sleep(1000);
                 }
@@ -83,7 +74,6 @@ public class Main {
         }
     }
 
-    // Sekwencja: Logowanie -> Ruchy -> Użycie Kompasu -> Wybór AnarchiaSMP
     private static void executeBotSequence(Session session) {
         new Thread(() -> {
             try {
@@ -92,45 +82,32 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login " + PASSWORD);
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // Krok 2: Weryfikacja ruchowa (obroty + chód)
+                // Krok 2: Weryfikacja ruchowa
                 Thread.sleep(2500);
                 System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
                 
                 double x = 0, y = 64, z = 0;
 
-                // Lekki obrót w lewo i prawo
-                session.send(new ServerboundMovePlayerPosRotPacket(true, x, y, z, -30.0f, 0.0f));
+                session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, -30.0f, 0.0f, true));
                 Thread.sleep(500);
-                session.send(new ServerboundMovePlayerPosRotPacket(true, x, y, z, 30.0f, 0.0f));
+                session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, 30.0f, 0.0f, true));
                 Thread.sleep(500);
 
-                // Chód do przodu przez ok. 6 sekund
                 System.out.println("[BOT] Idę do przodu przez 6 sekund...");
                 for (int i = 0; i < 12; i++) {
                     z += 0.5;
-                    session.send(new ServerboundMovePlayerPosRotPacket(true, x, y, z, 0.0f, 0.0f));
+                    session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, 0.0f, 0.0f, true));
                     Thread.sleep(500);
                 }
 
-                // Krok 3: Kliknięcie kompasu w dłoni (Prawy Przycisk Myszy)
-                System.out.println("[BOT] Używam kompasu (prawy klik)...");
+                // Krok 3: Użycie kompasu
+                System.out.println("[BOT] Używam kompasu w dłoni...");
                 session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0));
                 
-                // Krok 4: Wybór trybu AnarchiaSMP z otwieranego menu GUI
+                // Krok 4: Wybór trybu AnarchiaSMP
                 Thread.sleep(1500);
-                System.out.println("[BOT] Klikam w ikonę AnarchiaSMP w menu GUI...");
-                
-                // Slot 10 lub 11 zazwyczaj odpowiada pierwszej ikonie w serwerowych menu lobby
-                int targetSlot = 10; 
-                session.send(new ServerboundContainerClickPacket(
-                        1, 
-                        0, 
-                        targetSlot, 
-                        0, 
-                        ContainerActionType.CLICK_ITEM, 
-                        null, 
-                        Collections.emptyMap()
-                ));
+                System.out.println("[BOT] Dołączam na tryb AnarchiaSMP...");
+                session.send(new ServerboundChatCommandPacket("anarchia"));
 
                 System.out.println("[BOT] Sekwencja zakończona! Bot dołączył na AnarchiaSMP i utrzymuje AFK.");
 
@@ -140,7 +117,6 @@ public class Main {
         }).start();
     }
 
-    // Pobieranie rekordów DNS SRV
     private static String[] resolveSrv(String host) {
         try {
             Hashtable<String, String> env = new Hashtable<>();
