@@ -1,18 +1,18 @@
 package com.bot;
 
-import org.geysermc.mcprotocollib.network.session.Session;
-import org.geysermc.mcprotocollib.network.session.TcpClientSession;
+import org.geysermc.mcprotocollib.network.Client;
+import org.geysermc.mcprotocollib.network.Session;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
+import org.geysermc.mcprotocollib.network.event.session.PacketReceivedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
-import org.geysermc.mcprotocollib.protocol.packet.Packet;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickType;
 
-import java.lang.reflect.Constructor;
-import java.lang.reflect.Method;
 import java.util.Hashtable;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
@@ -28,7 +28,7 @@ public class Main {
 
     public static void main(String[] args) {
         System.out.println("=================================");
-        System.out.println("   AUTORSKI BOT AFK 1.21.4       ");
+        System.out.println("   AUTORSKI BOT AFK 1.20.4       ");
         System.out.println("   (MCProtocolLib + Maven)       ");
         System.out.println("=================================");
 
@@ -41,19 +41,20 @@ public class Main {
                 System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
-                TcpClientSession clientSession = new TcpClientSession(targetHost, targetPort, protocol);
+                Client client = new Client(targetHost, targetPort, protocol);
 
                 activeContainerId = -1;
 
-                clientSession.addListener(new SessionAdapter() {
+                client.getSession().addListener(new SessionAdapter() {
                     @Override
-                    public void packetReceived(Session session, Packet packet) {
+                    public void packetReceived(PacketReceivedEvent event) {
                         try {
+                            Object packet = event.getPacket();
                             String packetName = packet.getClass().getSimpleName();
 
-                            // 1. Wykrywanie otwarcia okna (kompas / menu)
+                            // 1. Wykrywanie otwarcia okna (menu / kompas)
                             if (packetName.contains("OpenScreen") || packetName.contains("ContainerOpen")) {
-                                Method getContainerId = packet.getClass().getMethod("getContainerId");
+                                java.lang.reflect.Method getContainerId = packet.getClass().getMethod("getContainerId");
                                 activeContainerId = (int) getContainerId.invoke(packet);
                                 System.out.println("[BOT] [GUI] Otwarto menu ekwipunku. ID kontenera: " + activeContainerId);
                             }
@@ -61,10 +62,10 @@ public class Main {
                             // 2. Wykrywanie zawartości okna i szukanie "AnarchiaSMP"
                             if (packetName.contains("ContainerSetContent") || packetName.contains("WindowItems")) {
                                 if (activeContainerId != -1) {
-                                    Method getContainerId = packet.getClass().getMethod("getContainerId");
+                                    java.lang.reflect.Method getContainerId = packet.getClass().getMethod("getContainerId");
                                     int id = (int) getContainerId.invoke(packet);
                                     if (id == activeContainerId) {
-                                        Method getItems = packet.getClass().getMethod("getItems");
+                                        java.lang.reflect.Method getItems = packet.getClass().getMethod("getItems");
                                         Iterable<?> items = (Iterable<?>) getItems.invoke(packet);
                                         
                                         int slotIndex = 0;
@@ -75,9 +76,9 @@ public class Main {
                                                     System.out.println("[BOT] [GUI] Znaleziono 'AnarchiaSMP' w slocie numer " + slotIndex + "!");
                                                     
                                                     // Klikamy w znaleziony slot
-                                                    clickSlotViaPacket(session, activeContainerId, slotIndex, item);
+                                                    clickSlot(client.getSession(), activeContainerId, slotIndex, item);
                                                     
-                                                    activeContainerId = -1; // Reset, aby nie klikać wielokrotnie
+                                                    activeContainerId = -1;
                                                     break;
                                                 }
                                             }
@@ -95,13 +96,12 @@ public class Main {
                     }
                 });
 
-                clientSession.connect();
+                client.connect();
                 System.out.println("[BOT] [OK] Wysłano żądanie połączenia...");
 
-                // Uruchomienie sekwencji bota w osobnym wątku
-                startBotSequence(clientSession);
+                startBotSequence(client.getSession());
 
-                while (clientSession.isConnected()) {
+                while (client.getSession() != null && client.getSession().isConnected()) {
                     Thread.sleep(1000);
                 }
 
@@ -119,28 +119,19 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                // Krok 1: Czekamy 4 sekundy na pełne załadowanie świata
                 System.out.println("[BOT] Czekam 4 sekundy na załadowanie świata...");
                 Thread.sleep(4000);
 
-                if (session == null || !session.isConnected()) {
-                    System.out.println("[BOT] Sesja nie jest aktywna, przerywam sekwencję.");
-                    return;
-                }
+                if (session == null || !session.isConnected()) return;
 
-                // Krok 2: Wpisanie komendy /login
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // Krok 3: Czekamy 4 sekundy po zalogowaniu na załadowanie ekwipunku
                 System.out.println("[BOT] Czekam 4 sekundy po zalogowaniu na odblokowanie ekwipunku...");
                 Thread.sleep(4000);
 
-                if (session == null || !session.isConnected()) {
-                    return;
-                }
+                if (session == null || !session.isConnected()) return;
 
-                // Krok 4: Weryfikacja ruchowa (antycheat)
                 System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
                 double x = 0, y = 64, z = 0;
 
@@ -156,43 +147,27 @@ public class Main {
                     Thread.sleep(500);
                 }
 
-                // Krok 5: Użycie kompasu w dłoni (kliknięcie PPM)
+                // Użycie kompasu na samym końcu sekwencji
                 System.out.println("[BOT] Używam kompasu w dłoni...");
                 session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0));
 
-                System.out.println("[BOT] Kompas został użyty. Czekam na reakcję serwera...");
+                System.out.println("[BOT] Kompas został użyty. Oczekuję na menu serwera...");
 
             } catch (Exception e) {
-                System.err.println("[BOT] Błąd podczas wykonywania sekwencji: " + e.getMessage());
+                System.err.println("[BOT] Błąd sekwencji: " + e.getMessage());
             }
         }).start();
     }
 
-    private static void clickSlotViaPacket(Session session, int containerId, int slotIndex, Object clickedItem) {
+    private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
         try {
-            Class<?> clickPacketClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket");
-            Class<?> clickTypeClass = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickType");
-            Object clickTypePickup = clickTypeClass.getField("PICKUP").get(null);
-
-            for (Constructor<?> constructor : clickPacketClass.getConstructors()) {
-                try {
-                    if (constructor.getParameterCount() >= 4) {
-                        Object packet;
-                        if (constructor.getParameterCount() == 6) {
-                            packet = constructor.newInstance(containerId, 0, slotIndex, 0, clickTypePickup, clickedItem);
-                        } else if (constructor.getParameterCount() == 7) {
-                            packet = constructor.newInstance(containerId, 0, slotIndex, 0, clickTypePickup, clickedItem, null);
-                        } else {
-                            packet = constructor.newInstance(containerId, slotIndex, 0, clickTypePickup);
-                        }
-                        session.send((Packet) packet);
-                        System.out.println("[BOT] Wysłano pakiet kliknięcia w slot " + slotIndex);
-                        return;
-                    }
-                } catch (Exception ignored) {}
-            }
+            ServerboundContainerClickPacket packet = new ServerboundContainerClickPacket(
+                containerId, 0, slotIndex, 0, ClickType.PICKUP, (org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack) clickedItem, null
+            );
+            session.send(packet);
+            System.out.println("[BOT] Wysłano pakiet kliknięcia w slot " + slotIndex);
         } catch (Exception e) {
-            System.err.println("[BOT] Nie udało się wysłać kliknięcia: " + e.getMessage());
+            System.err.println("[BOT] Błąd kliknięcia slotu: " + e.getMessage());
         }
     }
 
@@ -210,7 +185,6 @@ public class Main {
                         targetHost = targetHost.substring(0, targetHost.length() - 1);
                     }
                     String targetPort = srvData[2];
-                    System.out.println("[DNS] Znaleziono rekord SRV: " + targetHost + ":" + targetPort);
                     return new String[]{targetHost, targetPort};
                 }
             }
