@@ -127,7 +127,7 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                System.out.println("[BOT] Czekam 1 sekundę na załadowanie świata...");
+                System.out.println("[BOT] Czekam 1 sekundę na wejście do lobby...");
                 Thread.sleep(1000);
 
                 if (!session.isConnected()) return;
@@ -135,8 +135,9 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                System.out.println("[BOT] Czekam 1 sekundę po zalogowaniu na odblokowanie ekwipunku...");
-                Thread.sleep(1000);
+                // USTAWIONE NA 10 SEKUND DLA PEWNOŚCI ŁADOWANIA ŚWIATA
+                System.out.println("[BOT] Czekam 10 sekund na załadowanie świata, teleportację i odblokowanie EQ...");
+                Thread.sleep(10000);
 
                 if (!session.isConnected()) return;
 
