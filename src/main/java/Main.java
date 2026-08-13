@@ -11,7 +11,6 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -48,6 +47,7 @@ public class Main {
     private static volatile double currentZ = 0;
     private static volatile float currentYaw = 0;
     private static volatile float currentPitch = 0;
+    private static volatile boolean positionReceived = false;
 
     // Do blokowania spamu na czacie
     private static volatile String lastChatMessage = "";
@@ -71,6 +71,7 @@ public class Main {
                 activeContainerId = -1;
                 resourcePackFinished = false;
                 compassClicked = false;
+                positionReceived = false;
                 lastChatMessage = "";
 
                 session.addListener(new SessionAdapter() {
@@ -79,9 +80,9 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // Zapisywanie współrzędnych z serwera (np. po przeteleportowaniu na spawn)
+                            // 0. POTWIERDZANIE TELEPORTACJI I AKTUALIZACJA POZYCJI (KLUCZOWE DLA ANTY-CHETA)
                             if (packetName.contains("PlayerPosition") || packetName.contains("PosRot")) {
-                                updatePositionFromPacket(packet);
+                                handlePlayerPositionPacket(session, packet);
                             }
 
                             // 1. PACZKA ZASOBÓW
@@ -167,6 +168,48 @@ public class Main {
         }
     }
 
+    private static void handlePlayerPositionPacket(Session session, Packet packet) {
+        try {
+            for (Method m : packet.getClass().getMethods()) {
+                if (m.getParameterCount() == 0) {
+                    String name = m.getName().toLowerCase();
+                    if (name.equals("getx")) currentX = (double) m.invoke(packet);
+                    if (name.equals("gety")) currentY = (double) m.invoke(packet);
+                    if (name.equals("getz")) currentZ = (double) m.invoke(packet);
+                    if (name.equals("getyaw")) currentYaw = (float) m.invoke(packet);
+                    if (name.equals("getpitch")) currentPitch = (float) m.invoke(packet);
+                }
+            }
+            positionReceived = true;
+
+            // Odsyłanie potwierdzenia teleportu (Accept Teleportation)
+            for (Method m : packet.getClass().getMethods()) {
+                if (m.getName().toLowerCase().contains("teleportid") && m.getParameterCount() == 0) {
+                    int teleportId = (int) m.invoke(packet);
+                    sendTeleportConfirm(session, teleportId);
+                    break;
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private static void sendTeleportConfirm(Session session, int teleportId) {
+        try {
+            Class<?> confirmClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundAcceptTeleportationPacket");
+            Constructor<?> cons = confirmClass.getConstructor(int.class);
+            Packet confirmPacket = (Packet) cons.newInstance(teleportId);
+            session.send(confirmPacket);
+        } catch (Exception e) {
+            try {
+                // Alternatywna ścieżka klasy dla starszych wersji mcprotocollib
+                Class<?> confirmClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundAcceptTeleportationPacket");
+                Constructor<?> cons = confirmClass.getConstructor(int.class);
+                Packet confirmPacket = (Packet) cons.newInstance(teleportId);
+                session.send(confirmPacket);
+            } catch (Exception ignored) {}
+        }
+    }
+
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
@@ -188,46 +231,37 @@ public class Main {
 
                 if (!session.isConnected()) return;
 
-                // Odczekanie chwili na zsynchronizowanie pozycji
-                Thread.sleep(1000);
-                if (!session.isConnected()) return;
-
-                // KROK 3: NATYCHMIASTOWY RUCH (Weryfikacja 5/5)
-                System.out.println("[BOT] [RUCH] Wykonuję weryfikację ruchu...");
-                
-                // Obrót w prawo
-                currentYaw = 45.0f;
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
-                Thread.sleep(300);
-                if (!session.isConnected()) return;
-
-                // Obrót w lewo
-                currentYaw = -45.0f;
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
-                Thread.sleep(300);
-                if (!session.isConnected()) return;
-
-                // Wyprostowanie wzroku
-                currentYaw = 0.0f;
-                currentPitch = 0.0f;
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
-                Thread.sleep(200);
-                if (!session.isConnected()) return;
-
-                // Chodzenie do przodu – płynne kroki co 150 ms
-                System.out.println("[BOT] [RUCH] Idę do przodu...");
-                for (int i = 0; i < 20; i++) { // 20 kroków = ok. 3 sekundy stabilnego marszu
+                // Czekamy na odebranie pierwszej pozycji z serwera
+                startWait = System.currentTimeMillis();
+                while (!positionReceived && (System.currentTimeMillis() - startWait < 5000)) {
                     if (!session.isConnected()) return;
-                    currentZ += 0.2;
-                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
-                    Thread.sleep(150);
+                    Thread.sleep(100);
                 }
 
-                System.out.println("[BOT] [RUCH] Weryfikacja ruchu zakończona!");
                 Thread.sleep(1000);
                 if (!session.isConnected()) return;
 
-                // KROK 4: Zmiana slotu na kompas i użycie
+                // KROK 3: WERYFIKACJA RUCHU (Przesuwanie bota tak, aby serwer to zaliczył)
+                System.out.println("[BOT] [RUCH] Rozpoczynam zaliczanie weryfikacji pozycji...");
+
+                // Wykonujemy 6 wyraźnych kroków po skosie/do przodu z potwierdzeniem pozycji
+                for (int i = 1; i <= 6; i++) {
+                    if (!session.isConnected()) return;
+
+                    currentX += 0.3;
+                    currentZ += 0.3;
+
+                    // Wysyłamy pakiet pozycji i obrotu (onGround = true)
+                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
+                    
+                    Thread.sleep(250); // Bezpieczny odstęp czasowy
+                }
+
+                System.out.println("[BOT] [RUCH] Wykonano sekwencję kroków!");
+                Thread.sleep(1500); // Odczekanie, aż serwer przetworzy ruch i zdejmie blokadę
+                if (!session.isConnected()) return;
+
+                // KROK 4: Wybór slotu i kompasu
                 System.out.println("[BOT] Wybieram slot 4 (kompas)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
                 Thread.sleep(800);
@@ -260,21 +294,6 @@ public class Main {
             }
         }
         return sb.toString().trim();
-    }
-
-    private static void updatePositionFromPacket(Packet packet) {
-        try {
-            for (Method m : packet.getClass().getMethods()) {
-                if (m.getParameterCount() == 0) {
-                    String name = m.getName().toLowerCase();
-                    if (name.equals("getx")) currentX = (double) m.invoke(packet);
-                    if (name.equals("gety")) currentY = (double) m.invoke(packet);
-                    if (name.equals("getz")) currentZ = (double) m.invoke(packet);
-                    if (name.equals("getyaw")) currentYaw = (float) m.invoke(packet);
-                    if (name.equals("getpitch")) currentPitch = (float) m.invoke(packet);
-                }
-            }
-        } catch (Exception ignored) {}
     }
 
     private static void sendUseItemPacket(Session session, int sequence) {
@@ -654,7 +673,7 @@ public class Main {
             DirContext ctx = new InitialDirContext(env);
             Attributes attrs = ctx.getAttributes("_minecraft._tcp." + host, new String[]{"SRV"});
             if (attrs != null && attrs.get("SRV") != null) {
-                String[] srvData = attrs.get("SRV") .get().toString().split(" ");
+                String[] srvData = attrs.get("SRV").get().toString().split(" ");
                 if (srvData.length >= 4) {
                     String targetHost = srvData[3];
                     if (targetHost.endsWith(".")) targetHost = targetHost.substring(0, targetHost.length() - 1);
