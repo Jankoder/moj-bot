@@ -164,8 +164,9 @@ public class Main {
                     Thread.sleep(300);
                 }
 
-                System.out.println("[BOT] Wybieram slot 0 w ekwipunku...");
-                session.send(new ServerboundSetCarriedItemPacket(0));
+                // USTAWIONO SLOT 4 (ŚRODKOWY SLOT HOTBARA)
+                System.out.println("[BOT] Wybieram slot 4 (środkowy) w ekwipunku...");
+                session.send(new ServerboundSetCarriedItemPacket(4));
                 Thread.sleep(500);
 
                 System.out.println("[BOT] Używam kompasu w dłoni...");
