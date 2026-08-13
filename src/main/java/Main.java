@@ -47,6 +47,7 @@ public class Main {
     private static volatile float currentYaw = 0;
     private static volatile float currentPitch = 0;
     private static volatile boolean positionReceived = false;
+    private static volatile boolean isVerifying = false;
 
     // Do blokowania spamu na czacie
     private static volatile String lastChatMessage = "";
@@ -71,6 +72,7 @@ public class Main {
                 resourcePackFinished = false;
                 compassClicked = false;
                 positionReceived = false;
+                isVerifying = false;
                 lastChatMessage = "";
 
                 session.addListener(new SessionAdapter() {
@@ -128,13 +130,22 @@ public class Main {
                                 }
                             }
 
-                            // 4. CZAT SERWERA
+                            // 4. CZAT SERWERA I NATYCHMIASTOWA REAKCJA NA WERYFIKACJĘ
                             if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
                                 String cleanedText = cleanChatMessage(packet.toString());
 
                                 if (!cleanedText.isEmpty() && !cleanedText.equals(lastChatMessage)) {
                                     lastChatMessage = cleanedText;
                                     System.out.println("[BOT] [CZAT] " + cleanedText);
+                                }
+
+                                // NATYCHMIASTOWY START RUCHU PO OTRZYMANIU SYGNAŁU Z SERWERA
+                                String rawPacket = packet.toString().toLowerCase();
+                                if (rawPacket.contains("weryfikacja") || rawPacket.contains("poruszać") || rawPacket.contains("pozycji") || rawPacket.contains("ruszaj")) {
+                                    if (!isVerifying) {
+                                        isVerifying = true;
+                                        new Thread(() -> performMovementVerification(session)).start();
+                                    }
                                 }
                             }
 
@@ -240,10 +251,11 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // KROK 2: Czekamy na paczkę zasobów
+                // KROK 2: Czekamy na paczkę zasobów lub natychmiastowy sygnał weryfikacji
                 long startWait = System.currentTimeMillis();
                 while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 10000)) {
                     if (!session.isConnected()) return;
+                    if (isVerifying) break;
                     Thread.sleep(200);
                 }
 
@@ -253,14 +265,22 @@ public class Main {
                 startWait = System.currentTimeMillis();
                 while (!positionReceived && (System.currentTimeMillis() - startWait < 6000)) {
                     if (!session.isConnected()) return;
+                    if (isVerifying) break;
                     Thread.sleep(100);
                 }
 
                 Thread.sleep(1000);
                 if (!session.isConnected()) return;
 
-                // KROK 3: ZALICZANIE WERYFIKACJI RUCHU (20 Hz, 8 sekund, machanie głową ±15°)
-                performMovementVerification(session);
+                // KROK 3: ZALICZANIE WERYFIKACJI RUCHU
+                if (!isVerifying) {
+                    isVerifying = true;
+                    performMovementVerification(session);
+                } else {
+                    while (isVerifying && session.isConnected()) {
+                        Thread.sleep(100);
+                    }
+                }
 
                 if (!session.isConnected()) return;
 
@@ -290,7 +310,10 @@ public class Main {
 
         // 160 kroków po 50 ms = dokładnie 8.0 sekund ruchu
         for (int i = 0; i < 160; i++) {
-            if (!session.isConnected()) return;
+            if (!session.isConnected()) {
+                isVerifying = false;
+                return;
+            }
 
             // Łagodne rozglądanie się w lewo i prawo o maksymalnie 15 stopni
             float yawOffset = (float) (Math.sin(i * 0.12) * 15.0);
@@ -305,13 +328,14 @@ public class Main {
             sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
 
             try {
-                Thread.sleep(50); // Wyciskanie dokładnie 20 pakietów na sekundę (20 TPS)
+                Thread.sleep(50); // Dokładnie 20 pakietów na sekundę (20 TPS)
             } catch (InterruptedException e) {
                 break;
             }
         }
 
         System.out.println("[BOT] [RUCH] Zakończono 8-sekundową sekwencję ruchu!");
+        isVerifying = false;
     }
 
     private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround) {
