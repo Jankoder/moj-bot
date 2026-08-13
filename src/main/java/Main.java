@@ -143,6 +143,13 @@ public class Main {
                                 String rawPacket = packet.toString().toLowerCase();
                                 if (rawPacket.contains("weryfikacja") || rawPacket.contains("poruszać") || rawPacket.contains("pozycji") || rawPacket.contains("ruszaj")) {
                                     if (!isVerifying) {
+                                        // KLUCZOWE ZABEZPIECZENIE: Jeśli bot nie dostał jeszcze pakietu pozycji ze świata,
+                                        // to czekamy i blokujemy start ruchu, żeby nie wysłać kordów 0, 0, 0
+                                        if (!positionReceived) {
+                                            System.out.println("[BOT] [ANTY-CHEAT] Serwer żąda weryfikacji, ale jeszcze nie znamy naszej pozycji! Czekam...");
+                                            return; 
+                                        }
+                                        
                                         isVerifying = true;
                                         new Thread(() -> performMovementVerification(session)).start();
                                     }
@@ -479,11 +486,11 @@ public class Main {
                     if (name.contains("SUCCESSFULLY_LOADED") || name.equals("LOADED")) loaded = constant;
                 }
                 if (accepted != null) sendResourcePackResponse(session, packetClass, packId, accepted);
-                Thread.sleep(ThreadLocalRandom.current().nextLong(1200, 2200));
+                Thread.sleep(ThreadLocalRandom.current().nextLong(2500, 4000)); // Udajemy, że gra myśli i przygotowuje pobieranie
                 if (downloaded != null) sendResourcePackResponse(session, packetClass, packId, downloaded);
-                Thread.sleep(ThreadLocalRandom.current().nextLong(1500, 2500));
+                Thread.sleep(ThreadLocalRandom.current().nextLong(3500, 6000)); // Udajemy realny czas pobierania pliku z serwera
                 if (loaded != null) sendResourcePackResponse(session, packetClass, packId, loaded);
-                Thread.sleep(400);
+                Thread.sleep(800);
                 resourcePackFinished = true;
             } catch (Exception e) {
                 System.err.println("[BOT] Błąd paczki zasobów: " + e.getMessage());
