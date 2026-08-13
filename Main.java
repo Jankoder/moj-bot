@@ -1,6 +1,10 @@
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.util.Hashtable;
+import javax.naming.directory.Attributes;
+import javax.naming.directory.DirContext;
+import javax.naming.directory.InitialDirContext;
 
 public class Main {
     public static void main(String[] args) {
@@ -8,29 +12,29 @@ public class Main {
         System.out.println("   AUTORSKI BOT AFK 1.21.4      ");
         System.out.println("=================================");
         
-        String host = "anarchia.gg";
-        int port = 25565;
-        String username = "jankoder2"; // Twój stały nick
+        String inputHost = "anarchia.gg";
+        String username = "jankoder2"; // Twój nick
 
         while (true) {
             try {
-                System.out.println("[BOT] Proba polaczenia z " + host + ":" + port + " jako nick: " + username + "...");
-                
-                // Polaczenie z timeoutem 5 sekund
+                // Automatyczne sprawdzanie ukrytego rekordu DNS SRV
+                ServerAddress serverAddress = resolveSrv(inputHost);
+                System.out.println("[BOT] Polaczenie z: " + serverAddress.host + ":" + serverAddress.port + " jako: " + username);
+
                 Socket socket = new Socket();
-                socket.connect(new InetSocketAddress(host, port), 5000);
+                socket.connect(new InetSocketAddress(serverAddress.host, serverAddress.port), 10000); // 10s timeout
                 
                 DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                 DataInputStream in = new DataInputStream(socket.getInputStream());
 
-                // Handshake Packet (wersja 1.21.4 = protocol 768)
+                // Handshake Packet (Minecraft 1.21.4 = protocol 768)
                 ByteArrayOutputStream handshakeBytes = new ByteArrayOutputStream();
                 DataOutputStream handshakeOut = new DataOutputStream(handshakeBytes);
                 writeVarInt(handshakeOut, 0x00);
                 writeVarInt(handshakeOut, 768);
-                writeString(handshakeOut, host);
-                handshakeOut.writeShort(port);
-                writeVarInt(handshakeOut, 2); // Next State: Login
+                writeString(handshakeOut, inputHost);
+                handshakeOut.writeShort(serverAddress.port);
+                writeVarInt(handshakeOut, 2); // State: Login
                 sendPacket(out, handshakeBytes.toByteArray());
 
                 // Login Start Packet
@@ -38,43 +42,72 @@ public class Main {
                 DataOutputStream loginOut = new DataOutputStream(loginBytes);
                 writeVarInt(loginOut, 0x00);
                 writeString(loginOut, username);
-                loginOut.writeLong(0); // Offline UUID Sig
-                loginOut.writeLong(0); // Offline UUID Least
+                loginOut.writeLong(0);
+                loginOut.writeLong(0);
                 sendPacket(out, loginBytes.toByteArray());
 
-                System.out.println("[BOT] [OK] Pakiety polaczeniowe wyslane! Bot wbija na serwer!");
-                System.out.println("[BOT] Utrzymuje polaczenie AFK...");
+                System.out.println("[BOT] [OK] Polaczono! Bot wbija na serwer...");
 
-                // Petla czytajaca dane z serwera
+                // Petla utrzymujaca polaczenie
                 while (!socket.isClosed()) {
                     int length = readVarInt(in);
                     if (length < 0) {
-                        System.out.println("[BOT] [OSTRZEZENIE] Serwer zamknal polaczenie (rozlaczenie / kick).");
+                        System.out.println("[BOT] Serwer zamknal polaczenie (kick/rozlaczenie).");
                         break;
                     }
                     byte[] packetData = new byte[length];
                     in.readFully(packetData);
-                    
                     Thread.sleep(50);
                 }
             } catch (SocketTimeoutException e) {
-                System.err.println("[BOT] [BLAD TIMEOUT] Serwer nie odpowiedzial w ciagu 5 sekund.");
+                System.err.println("[BOT] [BLAD TIMEOUT] Serwer nie odpowiedzial. Ochrona serwera moze blokowac IP hostingu.");
             } catch (UnknownHostException e) {
-                System.err.println("[BOT] [BLAD DOMENY] Nie znaleziono adresu " + host + ". Sprawdz IP.");
+                System.err.println("[BOT] [BLAD DOMENY] Nie odnaleziono adresu IP dla " + inputHost);
             } catch (ConnectException e) {
-                System.err.println("[BOT] [BLAD POLACZENIA] Serwer jest wylaczony lub blokuje polaczenia z tego IP.");
-            } catch (EOFException e) {
-                System.err.println("[BOT] [BLAD KICK/DISCONNECT] Serwer odrzucil polaczenie bota (np. ban, kick lub wymagane Premium).");
+                System.err.println("[BOT] [BLAD POLACZENIA] Odmowa polaczenia na wybranym porcie.");
             } catch (Exception e) {
                 System.err.println("[BOT] [SZCZEGOLY BLADU]: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                e.printStackTrace(System.err); // Pokaze pelny szczegolowy slad bledu w konsoli
+                e.printStackTrace(System.err);
             }
 
-            System.out.println("[BOT] Odczekam 10 sekund przed ponowna proba...");
+            System.out.println("[BOT] Odczekam 10 sekund przed kolejna proba...");
             try {
                 Thread.sleep(10000);
             } catch (InterruptedException ignored) {}
         }
+    }
+
+    // Klasa do przechowywania adresu i portu
+    private static class ServerAddress {
+        String host;
+        int port;
+        ServerAddress(String host, int port) {
+            this.host = host;
+            this.port = port;
+        }
+    }
+
+    // Odczytywanie rekordow SRV tak jak w prawidlowym kliencie Minecrafta
+    private static ServerAddress resolveSrv(String host) {
+        try {
+            Hashtable<String, String> env = new Hashtable<>();
+            env.put("java.naming.factory.initial", "com.sun.jndi.dns.DnsContextFactory");
+            DirContext ctx = new InitialDirContext(env);
+            Attributes attrs = ctx.getAttributes("_minecraft._tcp." + host, new String[]{"SRV"});
+            if (attrs != null && attrs.get("SRV") != null) {
+                String[] srvData = attrs.get("SRV").get().toString().split(" ");
+                if (srvData.length >= 4) {
+                    String targetHost = srvData[3];
+                    if (targetHost.endsWith(".")) {
+                        targetHost = targetHost.substring(0, targetHost.length() - 1);
+                    }
+                    int targetPort = Integer.parseInt(srvData[2]);
+                    System.out.println("[DNS] Znaleziono rekord SRV: " + targetHost + ":" + targetPort);
+                    return new ServerAddress(targetHost, targetPort);
+                }
+            }
+        } catch (Exception ignored) {}
+        return new ServerAddress(host, 25565);
     }
 
     private static void sendPacket(DataOutputStream out, byte[] data) throws IOException {
@@ -100,7 +133,7 @@ public class Main {
             int value = (read & 127);
             result |= (value << (7 * numRead));
             numRead++;
-            if (numRead > 5) throw new IOException("VarInt za duzy - uszkodzony pakiet");
+            if (numRead > 5) throw new IOException("VarInt za duzy");
         } while ((read & 128) != 0);
         return result;
     }
