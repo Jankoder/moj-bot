@@ -1,4 +1,4 @@
-name: Build Bot JAR
+name: Build Java Bot JAR
 
 on:
   push:
@@ -16,13 +16,13 @@ jobs:
       with:
         java-version: '21'
         distribution: 'temurin'
+        cache: 'maven'
 
-    - name: Build JAR
-      run: |
-        javac Main.java
-        echo "Main-Class: Main" > manifest.txt
-        echo "" >> manifest.txt
-        jar cvfm server.jar manifest.txt *.class
+    - name: Build with Maven
+      run: mvn package -DskipTests
+
+    - name: Rename JAR
+      run: mv target/afk-bot-1.0.jar server.jar
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
