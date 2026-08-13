@@ -14,30 +14,22 @@
     </properties>
 
     <repositories>
-        <!-- Oficjalne repozytorium GeyserMC / OpenCollab -->
-        <repository>
-            <id>opencollab-main</id>
-            <url>https://repo.opencollab.dev/main/</url>
-            <releases>
-                <enabled>true</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
-        </repository>
-        <!-- Zapasowe repozytorium JitPack -->
+        <!-- JitPack pobierający bibliotekę z GitHuba GeyserMC -->
         <repository>
             <id>jitpack.io</id>
             <url>https://jitpack.io</url>
         </repository>
+        <repository>
+            <id>opencollab-main</id>
+            <url>https://repo.opencollab.dev/main/</url>
+        </repository>
     </repositories>
 
     <dependencies>
-        <!-- OPCJA 1: Pobieranie z OpenCollab (Zalecane) -->
         <dependency>
-            <groupId>org.geysermc.mcprotocollib</groupId>
+            <groupId>com.github.GeyserMC.MCProtocolLib</groupId>
             <artifactId>protocol</artifactId>
-            <version>1.19.4-SNAPSHOT</version>
+            <version>1.19.4-1</version>
         </dependency>
     </dependencies>
 
@@ -65,7 +57,7 @@
                         <configuration>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <!-- Podaj ścieżkę do swojej klasy z metodą main -->
+                                    <!-- Upewnij się, że poniżej podana jest właściwa klasa z metodą main -->
                                     <mainClass>com.bot.Main</mainClass>
                                 </transformer>
                             </transformers>
