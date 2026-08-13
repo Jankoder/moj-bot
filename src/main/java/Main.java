@@ -212,11 +212,14 @@ public class Main {
                 System.out.printf("[BOT] Odczytano pozycję: X=%.2f, Y=%.2f, Z=%.2f\n", currentX, currentY, currentZ);
             }
 
-            // Confirm Teleportation Packet
+            // Confirm Teleportation Packet and ECHO position (CRITICAL FOR ANTICHEAT)
             for (Method m : packet.getClass().getMethods()) {
                 if (m.getName().toLowerCase().contains("teleportid") && m.getParameterCount() == 0) {
                     int teleportId = (int) m.invoke(packet);
                     sendTeleportConfirm(session, teleportId);
+                    
+                    // Od razu po potwierdzeniu musimy wysłać serwerowi zwrotny pakiet Move w to samo miejsce!
+                    sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, false);
                     break;
                 }
             }
@@ -304,31 +307,28 @@ public class Main {
     }
 
     private static void performMovementVerification(Session session) {
-        System.out.println("[BOT] [RUCH] Rozpoczynam weryfikację ruchu (8 sekund, emulacja inputu WASD + obrót)...");
+        System.out.println("[BOT] [RUCH] Rozpoczynam weryfikację ruchu (8 sekund, emulacja chodu i obrotu)...");
 
         float baseYaw = currentYaw;
-        double speed = 0.11; // Standardowa prędkość chodu (~2.2 bloku/s)
+        double speed = 0.11; // Standardowa prędkość chodu
 
-        // 160 kroków po 50 ms = dokładnie 8.0 sekund ruchu (20 Hz)
+        // 160 kroków po 50 ms = 8.0 sekund ruchu
         for (int i = 0; i < 160; i++) {
             if (!session.isConnected()) {
                 isVerifying = false;
                 return;
             }
 
-            // 1. Wysyłamy pakiet mówiący serwerowi, że wciskamy klawisz marszu w przód (W)
-            sendPlayerInputPacket(session, true, false, false, false, false, false);
-
-            // 2. Łagodne rozglądanie się w lewo i prawo o maksymalnie 18 stopni
-            float yawOffset = (float) (Math.sin(i * 0.1) * 18.0);
+            // 1. Łagodne rozglądanie się w lewo i prawo (bez trzęsienia głową)
+            float yawOffset = (float) (Math.sin(i * 0.1) * 25.0);
             currentYaw = baseYaw + yawOffset;
 
-            // 3. Wyliczanie nowej pozycji w kierunku marszu
+            // 2. Wyliczanie nowej pozycji w kierunku marszu
             double rad = Math.toRadians(currentYaw);
             currentX -= Math.sin(rad) * speed;
             currentZ += Math.cos(rad) * speed;
 
-            // 4. Wysyłanie pakietu pozycji i obrotu
+            // 3. Wysyłanie TYLKO pakietu Move (zwykły klient nie wysyła InputPacket na piechotę!)
             sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
 
             try {
@@ -337,9 +337,6 @@ public class Main {
                 break;
             }
         }
-
-        // Puszczenie klawiszy po zakończeniu marszu
-        sendPlayerInputPacket(session, false, false, false, false, false, false);
 
         System.out.println("[BOT] [RUCH] Zakończono sekwencję weryfikacji!");
         isVerifying = false;
@@ -525,10 +522,10 @@ public class Main {
                 }
 
                 if (accepted != null) sendResourcePackResponse(session, packetClass, packId, accepted);
-                Thread.sleep(300);
+                Thread.sleep(1500); // Zamienione z 300 na 1500 ms (czas na udawane pobieranie)
 
                 if (downloaded != null) sendResourcePackResponse(session, packetClass, packId, downloaded);
-                Thread.sleep(300);
+                Thread.sleep(1500); // Zamienione z 300 na 1500 ms (czas na udawane ładowanie zasobów)
 
                 if (loaded != null) sendResourcePackResponse(session, packetClass, packId, loaded);
                 Thread.sleep(500);
