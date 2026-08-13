@@ -17,12 +17,15 @@ public class Main {
 
         while (true) {
             try {
-                // Automatyczne sprawdzanie ukrytego rekordu DNS SRV
-                ServerAddress serverAddress = resolveSrv(inputHost);
-                System.out.println("[BOT] Polaczenie z: " + serverAddress.host + ":" + serverAddress.port + " jako: " + username);
+                // Odczytanie SRV (zwraca tablice: [0] = host, [1] = port)
+                String[] srv = resolveSrv(inputHost);
+                String targetHost = srv[0];
+                int targetPort = Integer.parseInt(srv[1]);
+
+                System.out.println("[BOT] Lacznie z: " + targetHost + ":" + targetPort + " jako nick: " + username + "...");
 
                 Socket socket = new Socket();
-                socket.connect(new InetSocketAddress(serverAddress.host, serverAddress.port), 10000); // 10s timeout
+                socket.connect(new InetSocketAddress(targetHost, targetPort), 10000);
                 
                 DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                 DataInputStream in = new DataInputStream(socket.getInputStream());
@@ -33,7 +36,7 @@ public class Main {
                 writeVarInt(handshakeOut, 0x00);
                 writeVarInt(handshakeOut, 768);
                 writeString(handshakeOut, inputHost);
-                handshakeOut.writeShort(serverAddress.port);
+                handshakeOut.writeShort(targetPort);
                 writeVarInt(handshakeOut, 2); // State: Login
                 sendPacket(out, handshakeBytes.toByteArray());
 
@@ -46,9 +49,10 @@ public class Main {
                 loginOut.writeLong(0);
                 sendPacket(out, loginBytes.toByteArray());
 
-                System.out.println("[BOT] [OK] Polaczono! Bot wbija na serwer...");
+                System.out.println("[BOT] [OK] Polaczono pomyslnie z serwerem!");
+                System.out.println("[BOT] Utrzymuje polaczenie AFK...");
 
-                // Petla utrzymujaca polaczenie
+                // Petla czytajaca dane z serwera
                 while (!socket.isClosed()) {
                     int length = readVarInt(in);
                     if (length < 0) {
@@ -60,9 +64,9 @@ public class Main {
                     Thread.sleep(50);
                 }
             } catch (SocketTimeoutException e) {
-                System.err.println("[BOT] [BLAD TIMEOUT] Serwer nie odpowiedzial. Ochrona serwera moze blokowac IP hostingu.");
+                System.err.println("[BOT] [BLAD TIMEOUT] Serwer nie odpowiedzial.");
             } catch (UnknownHostException e) {
-                System.err.println("[BOT] [BLAD DOMENY] Nie odnaleziono adresu IP dla " + inputHost);
+                System.err.println("[BOT] [BLAD DOMENY] Nie odnaleziono IP dla " + inputHost);
             } catch (ConnectException e) {
                 System.err.println("[BOT] [BLAD POLACZENIA] Odmowa polaczenia na wybranym porcie.");
             } catch (Exception e) {
@@ -77,18 +81,8 @@ public class Main {
         }
     }
 
-    // Klasa do przechowywania adresu i portu
-    private static class ServerAddress {
-        String host;
-        int port;
-        ServerAddress(String host, int port) {
-            this.host = host;
-            this.port = port;
-        }
-    }
-
-    // Odczytywanie rekordow SRV tak jak w prawidlowym kliencie Minecrafta
-    private static ServerAddress resolveSrv(String host) {
+    // Rekordy SRV bez uzywania dodatkowych klas
+    private static String[] resolveSrv(String host) {
         try {
             Hashtable<String, String> env = new Hashtable<>();
             env.put("java.naming.factory.initial", "com.sun.jndi.dns.DnsContextFactory");
@@ -101,13 +95,13 @@ public class Main {
                     if (targetHost.endsWith(".")) {
                         targetHost = targetHost.substring(0, targetHost.length() - 1);
                     }
-                    int targetPort = Integer.parseInt(srvData[2]);
+                    String targetPort = srvData[2];
                     System.out.println("[DNS] Znaleziono rekord SRV: " + targetHost + ":" + targetPort);
-                    return new ServerAddress(targetHost, targetPort);
+                    return new String[]{targetHost, targetPort};
                 }
             }
         } catch (Exception ignored) {}
-        return new ServerAddress(host, 25565);
+        return new String[]{host, "25565"};
     }
 
     private static void sendPacket(DataOutputStream out, byte[] data) throws IOException {
