@@ -135,7 +135,6 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // USTAWIONE NA 10 SEKUND DLA PEWNOŚCI ŁADOWANIA ŚWIATA
                 System.out.println("[BOT] Czekam 10 sekund na załadowanie świata, teleportację i odblokowanie EQ...");
                 Thread.sleep(10000);
 
@@ -149,9 +148,10 @@ public class Main {
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
                 Thread.sleep(300);
 
-                System.out.println("[BOT] Idę do przodu...");
-                for (int i = 0; i < 6; i++) {
-                    z += 0.5;
+                System.out.println("[BOT] Idę do przodu przez dokładnie 6 sekund...");
+                // 20 kroków * 300 ms = 6000 ms (6 sekund)
+                for (int i = 0; i < 20; i++) {
+                    z += 0.2; // płynny ruch do przodu
                     session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
                     Thread.sleep(300);
                 }
