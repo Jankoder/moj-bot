@@ -12,12 +12,16 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.InetSocketAddress;
+import java.net.Proxy;
 import java.net.SocketAddress;
 import java.net.URL;
 import java.util.*;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import javax.naming.directory.Attributes;
@@ -123,7 +127,6 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                // Skrócono czas oczekiwania na załadowanie z 4s na 1s
                 System.out.println("[BOT] Czekam 1 sekundę na załadowanie świata...");
                 Thread.sleep(1000);
 
@@ -132,7 +135,6 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // Skrócono czas oczekiwania po zalogowaniu z 4s na 1s
                 System.out.println("[BOT] Czekam 1 sekundę po zalogowaniu na odblokowanie ekwipunku...");
                 Thread.sleep(1000);
 
@@ -290,7 +292,6 @@ public class Main {
         List<Class<?>> classes = scanMcProtocolLibClasses();
         System.out.println("[BOT] Przeszukano " + classes.size() + " klas związanych z sesją.");
 
-        // Priorytet dla ClientNetworkSession oraz ClientSession
         classes.sort((c1, c2) -> {
             String n1 = c1.getSimpleName();
             String n2 = c2.getSimpleName();
@@ -305,6 +306,7 @@ public class Main {
             if (!clazz.isInterface() && !Modifier.isAbstract(clazz.getModifiers())) {
                 Session session = tryInstantiateSessionClass(clazz, host, port, protocol);
                 if (session != null) {
+                    injectExecutors(session);
                     System.out.println("[BOT] Utworzono sesję z klasy: " + clazz.getName());
                     return session;
                 }
@@ -325,19 +327,23 @@ public class Main {
             for (int i = 0; i < types.length; i++) {
                 Class<?> t = types[i];
 
-                if (t == String.class) {
+                if (Executor.class.isAssignableFrom(t) || t.getName().contains("Executor")) {
+                    args[i] = Executors.newSingleThreadExecutor();
+                } else if (Proxy.class.isAssignableFrom(t)) {
+                    args[i] = Proxy.NO_PROXY;
+                } else if (t == String.class) {
                     if (!hostAssigned) {
-                        args[i] = host; // Pierwszy String to host docelowy
+                        args[i] = host;
                         hostAssigned = true;
                     } else {
-                        args[i] = null; // Kolejne Stringi (np. bind host) ustawiamy na null
+                        args[i] = null;
                     }
                 } else if (t == int.class || t == Integer.class) {
                     if (!portAssigned) {
-                        args[i] = port; // Pierwszy int to port docelowy
+                        args[i] = port;
                         portAssigned = true;
                     } else {
-                        args[i] = 0; // Kolejne inty (np. bind port) ustawiamy na 0
+                        args[i] = 0;
                     }
                 } else if (t.isAssignableFrom(protocol.getClass()) || t.getName().contains("Protocol")) {
                     args[i] = protocol;
@@ -347,7 +353,7 @@ public class Main {
                         hostAssigned = true;
                         portAssigned = true;
                     } else {
-                        args[i] = null; // Kolejne adresy (np. bind address) na null
+                        args[i] = null;
                     }
                 } else if (t == boolean.class || t == Boolean.class) {
                     args[i] = false;
@@ -371,6 +377,24 @@ public class Main {
         }
 
         return null;
+    }
+
+    private static void injectExecutors(Object obj) {
+        if (obj == null) return;
+        Class<?> current = obj.getClass();
+        while (current != null && current != Object.class) {
+            for (Field f : current.getDeclaredFields()) {
+                if (Executor.class.isAssignableFrom(f.getType()) || f.getType().getName().contains("Executor")) {
+                    try {
+                        f.setAccessible(true);
+                        if (f.get(obj) == null) {
+                            f.set(obj, Executors.newSingleThreadExecutor());
+                        }
+                    } catch (Throwable ignored) {}
+                }
+            }
+            current = current.getSuperclass();
+        }
     }
 
     private static List<Class<?>> scanMcProtocolLibClasses() {
