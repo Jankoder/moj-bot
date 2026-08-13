@@ -15,21 +15,16 @@
 
     <repositories>
         <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
-        <repository>
             <id>opencollab-repo</id>
             <url>https://repo.opencollab.dev/main/</url>
         </repository>
     </repositories>
 
     <dependencies>
-        <!-- Wskazujemy konkretny moduł: protocol -->
         <dependency>
-            <groupId>com.github.GeyserMC.MCProtocolLib</groupId>
+            <groupId>org.geysermc.mcprotocollib</groupId>
             <artifactId>protocol</artifactId>
-            <version>master-SNAPSHOT</version>
+            <version>3.5.0</version>
         </dependency>
     </dependencies>
 
