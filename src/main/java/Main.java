@@ -1,7 +1,7 @@
 package com.bot;
 
 import org.geysermc.mcprotocollib.network.Session;
-import org.geysermc.mcprotocollib.network.session.TcpClientSession;
+import org.geysermc.mcprotocollib.network.session.ClientSession;
 import org.geysermc.mcprotocollib.network.packet.Packet;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
@@ -43,7 +43,7 @@ public class Main {
                 System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
-                TcpClientSession session = new TcpClientSession(targetHost, targetPort, protocol);
+                Session session = new ClientSession(targetHost, targetPort, protocol);
 
                 activeContainerId = -1;
 
@@ -116,7 +116,7 @@ public class Main {
         }
     }
 
-    private static void startBotSequence(TcpClientSession session) {
+    private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
                 System.out.println("[BOT] Czekam 4 sekundy na załadowanie świata...");
@@ -135,7 +135,6 @@ public class Main {
                 System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
                 double x = 0, y = 64, z = 0;
 
-                // Poprawione dla 1.21: (onGround, horizontalCollision, x, y, z, yaw, pitch)
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, -30.0f, 0.0f));
                 Thread.sleep(500);
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
@@ -159,14 +158,14 @@ public class Main {
         }).start();
     }
 
-    private static void clickSlot(TcpClientSession session, int containerId, int slotIndex, Object clickedItem) {
+    private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
         try {
             ServerboundContainerClickPacket packet = new ServerboundContainerClickPacket(
                 containerId, 
                 0, 
                 slotIndex, 
                 0, 
-                ContainerActionType.CLICK, 
+                ContainerActionType.CLICK_ITEM, 
                 (ItemStack) clickedItem, 
                 new Int2ObjectOpenHashMap<>()
             );
