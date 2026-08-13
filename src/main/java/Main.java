@@ -65,9 +65,9 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // 1. AUTOMATYCZNE AKCEPTOWANIE PACZKI ZASOBÓW (ZGODNIE Z USTAWIENIEM MC "ENABLED")
+                            // 1. DYNAMICZNA OBSŁUGA PACZKI ZASOBÓW (AUTOMATYCZNE AKCEPTOWANIE)
                             if (packetName.contains("ResourcePack")) {
-                                System.out.println("[BOT] [RESOURCE PACK] Wykryto żądanie paczki zasobów. Automatycznie przyjmowanie...");
+                                System.out.println("[BOT] [RESOURCE PACK] Wykryto żądanie paczki zasobów. Automatycznie akceptuję...");
                                 handleResourcePack(session, packet);
                             }
 
@@ -198,54 +198,30 @@ public class Main {
     private static void handleResourcePack(Session session, Packet incomingPacket) {
         new Thread(() -> {
             try {
-                // 1. Odczytywanie UUID paczki
+                // 1. Odczytywanie UUID z pakietu przychodzącego
                 UUID packId = null;
                 for (Method m : incomingPacket.getClass().getMethods()) {
-                    if (m.getName().toLowerCase().contains("id") && m.getReturnType() == UUID.class) {
+                    if (m.getParameterCount() == 0 && m.getReturnType() == UUID.class) {
                         try {
                             packId = (UUID) m.invoke(incomingPacket);
-                            break;
+                            if (packId != null) break;
                         } catch (Exception ignored) {}
                     }
                 }
 
-                // 2. Szukanie klasy pakietu wysyłanego do serwera
-                Class<?> packetClass = null;
-                String[] candidatePacketNames = new String[] {
-                    "org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundResourcePackPacket",
-                    "org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundResourcePackResponsePacket"
-                };
-
-                for (String pName : candidatePacketNames) {
-                    try {
-                        packetClass = Class.forName(pName);
-                        break;
-                    } catch (ClassNotFoundException ignored) {}
-                }
+                // 2. Dynamiczne przeszukiwanie JAR-a w celu odnalezienia klasy wychodzącego pakietu ResourcePack
+                Class<?> packetClass = findServerboundResourcePackClass();
 
                 if (packetClass == null) {
-                    System.err.println("[BOT] [RESOURCE PACK] Błąd: Nie odnaleziono pakietu ResourcePack w bibliotece.");
+                    System.err.println("[BOT] [RESOURCE PACK] Błąd: Nie odnaleziono pakietu wychodzącego w JAR.");
                     return;
                 }
 
-                // 3. Szukanie enuma ze statusem paczki
-                Class<?> statusEnum = null;
-                String[] candidateStatusNames = new String[] {
-                    "org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus",
-                    "org.geysermc.mcprotocollib.protocol.data.game.entity.player.ResourcePackStatus",
-                    packetClass.getName() + "$Action",
-                    packetClass.getName() + "$Status"
-                };
+                // 3. Dynamiczne odnajdywanie Enum statusu
+                Class<?> statusEnum = findStatusEnum(packetClass);
 
-                for (String sName : candidateStatusNames) {
-                    try {
-                        statusEnum = Class.forName(sName);
-                        if (statusEnum.isEnum()) break;
-                    } catch (ClassNotFoundException ignored) {}
-                }
-
-                if (statusEnum == null || !statusEnum.isEnum()) {
-                    System.err.println("[BOT] [RESOURCE PACK] Błąd: Nie odnaleziono enuma statusu paczki zasobów.");
+                if (statusEnum == null) {
+                    System.err.println("[BOT] [RESOURCE PACK] Błąd: Nie odnaleziono enuma statusu paczki.");
                     return;
                 }
 
@@ -258,23 +234,73 @@ public class Main {
                     if (name.contains("SUCCESSFULLY_LOADED") || name.contains("LOADED")) loaded = constant;
                 }
 
-                // 4. Wysyłanie odpowiedzi do serwera
+                // 4. Wysyłanie pakietów odpowiedzi
                 if (accepted != null) {
                     sendResourcePackResponse(session, packetClass, packId, accepted);
-                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: ACCEPTED (Zaakceptowano paczkę)");
+                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: ACCEPTED (Zaakceptowano)");
                 }
 
                 Thread.sleep(300);
 
                 if (loaded != null) {
                     sendResourcePackResponse(session, packetClass, packId, loaded);
-                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: SUCCESSFULLY_LOADED (Paczka załadowana)");
+                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: SUCCESSFULLY_LOADED (Załadowano)");
                 }
 
             } catch (Exception e) {
-                System.err.println("[BOT] Błąd obsługi Resource Packa: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
+                System.err.println("[BOT] Błąd obsługi Resource Packa: " + e.getMessage());
             }
         }).start();
+    }
+
+    private static Class<?> findServerboundResourcePackClass() {
+        try {
+            Set<URL> urls = new HashSet<>();
+            try { urls.add(Session.class.getProtectionDomain().getCodeSource().getLocation()); } catch (Throwable ignored) {}
+            try { urls.add(Main.class.getProtectionDomain().getCodeSource().getLocation()); } catch (Throwable ignored) {}
+
+            for (URL location : urls) {
+                if (location == null) continue;
+                java.io.File file = new java.io.File(location.toURI());
+                if (file.exists() && file.isFile() && file.getName().endsWith(".jar")) {
+                    try (JarFile jarFile = new JarFile(file)) {
+                        Enumeration<JarEntry> entries = jarFile.entries();
+                        while (entries.hasMoreElements()) {
+                            JarEntry entry = entries.nextElement();
+                            String name = entry.getName();
+                            if (name.endsWith(".class") && name.contains("mcprotocollib")) {
+                                String className = name.replace('/', '.').substring(0, name.length() - 6);
+                                if (className.contains("Serverbound") && className.contains("ResourcePack")) {
+                                    try {
+                                        Class<?> c = Class.forName(className);
+                                        if (Packet.class.isAssignableFrom(c)) {
+                                            return c;
+                                        }
+                                    } catch (Throwable ignored) {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static Class<?> findStatusEnum(Class<?> packetClass) {
+        for (Constructor<?> cons : packetClass.getConstructors()) {
+            for (Class<?> param : cons.getParameterTypes()) {
+                if (param.isEnum()) {
+                    return param;
+                }
+            }
+        }
+        for (Class<?> inner : packetClass.getDeclaredClasses()) {
+            if (inner.isEnum()) {
+                return inner;
+            }
+        }
+        return null;
     }
 
     private static void sendResourcePackResponse(Session session, Class<?> packetClass, UUID packId, Object status) {
