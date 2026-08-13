@@ -7,10 +7,10 @@ import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
 import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 
 import java.lang.reflect.Constructor;
@@ -24,6 +24,7 @@ import java.net.URL;
 import java.util.*;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import javax.naming.directory.Attributes;
@@ -37,9 +38,9 @@ public class Main {
     private static final String PASSWORD = "Krokodyl12!";
 
     private static volatile int activeContainerId = -1;
-    private static volatile boolean waitingForGui = false;
     private static volatile boolean resourcePackFinished = false;
-    private static volatile long lastCompassUse = 0;
+    private static volatile boolean compassClicked = false;
+    private static final AtomicInteger sequenceCounter = new AtomicInteger(0);
 
     public static void main(String[] args) {
         System.out.println("=================================");
@@ -59,8 +60,8 @@ public class Main {
                 Session session = createSession(targetHost, targetPort, protocol);
 
                 activeContainerId = -1;
-                waitingForGui = false;
                 resourcePackFinished = false;
+                compassClicked = false;
 
                 session.addListener(new SessionAdapter() {
                     @Override
@@ -68,42 +69,24 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // 1. OBSŁUGA PACZKI ZASOBÓW (ACCEPTED -> DOWNLOADED -> LOADED)
+                            // 1. PACZKA ZASOBÓW
                             if (packetName.contains("ResourcePack")) {
-                                System.out.println("[BOT] [RESOURCE PACK] Wykryto żądanie paczki zasobów. Rozpoczynam sekwencję akceptacji...");
+                                System.out.println("[BOT] [RESOURCE PACK] Wykryto żądanie paczki zasobów...");
                                 handleResourcePack(session, packet);
                             }
 
-                            // 2. CZAT & REAKCJA NA ANTY-BOT
-                            if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
-                                String chatText = extractChatText(packet);
-                                if (waitingForGui) {
-                                    System.out.println("[BOT] [CZAT SERWERA] -> " + chatText);
-                                }
-
-                                // Jeśli serwer ponagla, a GUI nie jest otwarte – ponawiamy kompas z opóźnieniem
-                                if (chatText.contains("Trwa pobieranie") && (System.currentTimeMillis() - lastCompassUse > 4000)) {
-                                    lastCompassUse = System.currentTimeMillis();
-                                    new Thread(() -> {
-                                        try {
-                                            System.out.println("[BOT] Otrzymano informację o pobieraniu - czekam 3 sekundy...");
-                                            Thread.sleep(3000);
-                                            if (activeContainerId == -1 && resourcePackFinished) {
-                                                useCompass(session);
-                                            }
-                                        } catch (Exception ignored) {}
-                                    }).start();
-                                }
-                            }
-
-                            // 3. OTRZYMANIE GUI / EKWIPUNKU
+                            // 2. OTWARCIE MENU Z TRYBAMI
                             if (packetName.contains("OpenScreen") || packetName.contains("ContainerOpen") || packetName.contains("OpenWindow")) {
                                 Method getContainerId = packet.getClass().getMethod("getContainerId");
-                                activeContainerId = (int) getContainerId.invoke(packet);
-                                System.out.println("[BOT] [GUI] Otwarto menu ekwipunku! ID kontenera: " + activeContainerId);
+                                int cid = (int) getContainerId.invoke(packet);
+                                
+                                if (compassClicked && cid > 0) {
+                                    activeContainerId = cid;
+                                    System.out.println("[BOT] [GUI] Otwarto menu wyboru serwera! ID kontenera: " + activeContainerId);
+                                }
                             }
 
-                            // 4. SZUKANIE "ANARCHIA" / "SMP" W OTWRTYM GUI
+                            // 3. KLIKNIĘCIE W ANARCHIA SMP
                             if (packetName.contains("ContainerSetContent") || packetName.contains("WindowItems") || packetName.contains("SetContainerContent")) {
                                 if (activeContainerId != -1) {
                                     Method getContainerId = packet.getClass().getMethod("getContainerId");
@@ -116,13 +99,13 @@ public class Main {
                                         for (Object item : items) {
                                             if (item != null) {
                                                 String itemStr = item.toString().toLowerCase();
-                                                if (itemStr.contains("anarchia") || itemStr.contains("anarchiasmp") || itemStr.contains("smp")) {
-                                                    System.out.println("[BOT] [GUI] Znaleziono serwer w slocie numer " + slotIndex + "!");
+                                                if (itemStr.contains("anarchia") || itemStr.contains("smp") || itemStr.contains("graj")) {
+                                                    System.out.println("[BOT] [GUI] Znaleziono AnarchiaSMP w slocie nr " + slotIndex + "! Klikam...");
                                                     
+                                                    Thread.sleep(500);
                                                     clickSlot(session, activeContainerId, slotIndex, item);
                                                     
                                                     activeContainerId = -1;
-                                                    waitingForGui = false;
                                                     break;
                                                 }
                                             }
@@ -131,6 +114,15 @@ public class Main {
                                     }
                                 }
                             }
+
+                            // 4. CZAT SERWERA
+                            if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
+                                String chatText = extractChatText(packet);
+                                if (chatText.length() > 0 && !chatText.contains("ActionBar")) {
+                                    System.out.println("[BOT] [CZAT] " + chatText);
+                                }
+                            }
+
                         } catch (Exception ignored) {}
                     }
 
@@ -163,110 +155,124 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                System.out.println("[BOT] Czekam 2 sekundy na wejście do lobby...");
+                // KROK 1: Wejście do gry i logowanie
+                System.out.println("[BOT] Czekam 2 sekundy na połączenie z lobby...");
                 Thread.sleep(2000);
 
                 if (!session.isConnected()) return;
 
-                // Wysyłamy markę klienta (minecraft:brand = vanilla)
                 sendBrandPayload(session);
 
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                System.out.println("[BOT] Oczekiwanie na sekwencję paczki zasobów...");
+                // KROK 2: Oczekiwanie na paczkę zasobów
+                System.out.println("[BOT] Czekam na załadowanie paczki zasobów...");
                 long startWait = System.currentTimeMillis();
-                while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 12000)) {
-                    Thread.sleep(500);
+                while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 15000)) {
+                    Thread.sleep(300);
                 }
 
                 if (!session.isConnected()) return;
 
-                System.out.println("[BOT] Paczka zasobów załadowana. Odczekuję 1.5s na ustabilizowanie stanu gracza...");
-                Thread.sleep(1500);
-
-                System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
-                double x = 0, y = 64, z = 0;
-
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, -30.0f, 0.0f));
-                Thread.sleep(300);
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
-                Thread.sleep(300);
-
-                System.out.println("[BOT] Idę do przodu...");
-                for (int i = 0; i < 10; i++) {
-                    z += 0.2;
-                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
-                    Thread.sleep(300);
+                // WYMAGANE 20 SEKUND CZEKANIA NA PEŁNE ZAŁADOWANIE MAPY/GWARANCJĘ STABILNOŚCI
+                System.out.println("[BOT] Paczka pobrana! Odczekuję 20 sekund na pełne załadowanie terenu i zasobów...");
+                for (int i = 20; i > 0; i -= 5) {
+                    System.out.println("[BOT] Czekam na ustabilizowanie: zostało " + i + "s...");
+                    Thread.sleep(5000);
+                    if (!session.isConnected()) return;
                 }
 
-                // Wybieramy slot 4 (5. okienko na paseku)
-                System.out.println("[BOT] Wybieram slot 4 (5. okienko z kompasem)...");
-                session.send(new ServerboundSetCarriedItemPacket(4));
-                Thread.sleep(800);
+                System.out.println("[BOT] Stan gry ustabilizowany. Rozpoczynam działanie!");
 
-                waitingForGui = true;
-                useCompass(session);
+                // KROK 3: Przełączenie slotu na kompas (slot 4 = 5. okienko)
+                System.out.println("[BOT] Przełączam na slot 4 (kompas)...");
+                session.send(new ServerboundSetCarriedItemPacket(4));
+                Thread.sleep(1000);
+
+                // KROK 4: SEKWENCJA RUCHÓW (Lewo -> Prawo -> Prostowanie -> Chód przez 8s)
+                double x = 0, y = 64, z = 0;
+
+                System.out.println("[BOT] [RUCH] Obracam się w lewo...");
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, -90.0f, 0.0f));
+                Thread.sleep(600);
+
+                System.out.println("[BOT] [RUCH] Obracam się w prawo...");
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 90.0f, 0.0f));
+                Thread.sleep(600);
+
+                System.out.println("[BOT] [RUCH] Prostuję wzrok...");
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
+                Thread.sleep(400);
+
+                System.out.println("[BOT] [RUCH] Idę do przodu przez 8 sekund dla pewności...");
+                long walkStartTime = System.currentTimeMillis();
+                while (System.currentTimeMillis() - walkStartTime < 8000) {
+                    if (!session.isConnected()) return;
+                    z += 0.15;
+                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
+                    Thread.sleep(200);
+                }
+
+                System.out.println("[BOT] Sekwencja chodzenia ukończona.");
+                Thread.sleep(500);
+
+                // KROK 5: Użycie kompasu (kliknięcie PRAWYM przyciskiem myszy)
+                System.out.println("[BOT] Klikam kompasem w dłoni (Użycie przedmiotu)...");
+                compassClicked = true;
+                
+                int seq = sequenceCounter.incrementAndGet();
+                session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+                sendUseItemPacket(session, seq);
 
             } catch (Exception e) {
-                System.err.println("[BOT] Błąd sekwencji: " + e.getMessage());
+                System.err.println("[BOT] Błąd w sekwencji: " + e.getMessage());
             }
         }).start();
+    }
+
+    private static void sendUseItemPacket(Session session, int sequence) {
+        try {
+            Constructor<?>[] constructors = ServerboundUseItemPacket.class.getConstructors();
+            for (Constructor<?> cons : constructors) {
+                Class<?>[] pTypes = cons.getParameterTypes();
+                if (pTypes.length == 2 && pTypes[0] == Hand.class && (pTypes[1] == int.class || pTypes[1] == Integer.class)) {
+                    session.send((Packet) cons.newInstance(Hand.MAIN_HAND, sequence));
+                    return;
+                }
+            }
+            session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, sequence));
+        } catch (Exception e) {
+            try {
+                session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0));
+            } catch (Exception ignored) {}
+        }
     }
 
     private static void sendBrandPayload(Session session) {
         try {
             byte[] data = new byte[] { 0x07, 'v', 'a', 'n', 'i', 'l', 'l', 'a' };
-            
-            Class<?> customPayloadClass = null;
-            try {
-                customPayloadClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundCustomPayloadPacket");
-            } catch (ClassNotFoundException ignored) {}
+            Class<?> customPayloadClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundCustomPayloadPacket");
 
-            if (customPayloadClass != null) {
-                for (Constructor<?> cons : customPayloadClass.getConstructors()) {
-                    Class<?>[] pTypes = cons.getParameterTypes();
-                    if (pTypes.length == 2) {
-                        Object arg1 = null;
-                        if (pTypes[0] == String.class) {
-                            arg1 = "minecraft:brand";
-                        } else if (pTypes[0].getName().contains("Key") || pTypes[0].getName().contains("ResourceLocation")) {
-                            Method keyMethod = pTypes[0].getMethod("key", String.class, String.class);
-                            arg1 = keyMethod.invoke(null, "minecraft", "brand");
-                        }
+            for (Constructor<?> cons : customPayloadClass.getConstructors()) {
+                Class<?>[] pTypes = cons.getParameterTypes();
+                if (pTypes.length == 2) {
+                    Object arg1 = null;
+                    if (pTypes[0] == String.class) {
+                        arg1 = "minecraft:brand";
+                    } else if (pTypes[0].getName().contains("Key") || pTypes[0].getName().contains("ResourceLocation")) {
+                        Method keyMethod = pTypes[0].getMethod("key", String.class, String.class);
+                        arg1 = keyMethod.invoke(null, "minecraft", "brand");
+                    }
 
-                        if (arg1 != null && pTypes[1] == byte[].class) {
-                            session.send((Packet) cons.newInstance(arg1, data));
-                            System.out.println("[BOT] [VERIFY] Wysłano pakiet tożsamości klienta (minecraft:brand)");
-                            return;
-                        }
+                    if (arg1 != null && pTypes[1] == byte[].class) {
+                        session.send((Packet) cons.newInstance(arg1, data));
+                        System.out.println("[BOT] [VERIFY] Wysłano pakiet tożsamości klienta (minecraft:brand)");
+                        return;
                     }
                 }
             }
-        } catch (Exception e) {
-            System.err.println("[BOT] Ostrzeżenie przy wysyłaniu brandu: " + e.getMessage());
-        }
-    }
-
-    private static void useCompass(Session session) {
-        if (!session.isConnected()) return;
-        
-        // Zabezpieczenie przed użyciem kompasu gdy GUI jest już otwarte
-        if (activeContainerId != -1) {
-            System.out.println("[BOT] Menu jest już otwarte. Pomijam ponowne kliknięcie kompasu.");
-            return;
-        }
-
-        // Zabezpieczenie przed użyciem kompasu gdy serwer jeszcze przetwarza paczkę
-        if (!resourcePackFinished) {
-            System.out.println("[BOT] Paczka zasobów nie jest jeszcze przetworzona. Pomijam kliknięcie.");
-            return;
-        }
-
-        System.out.println("[BOT] Używam kompasu w dłoni...");
-        lastCompassUse = System.currentTimeMillis();
-        session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
-        session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
+        } catch (Exception ignored) {}
     }
 
     private static void handleResourcePack(Session session, Packet incomingPacket) {
@@ -290,10 +296,7 @@ public class Main {
                 Class<?> statusEnum = findStatusEnum(packetClass);
                 if (statusEnum == null) return;
 
-                Object accepted = null;
-                Object downloaded = null;
-                Object loaded = null;
-
+                Object accepted = null, downloaded = null, loaded = null;
                 for (Object constant : statusEnum.getEnumConstants()) {
                     String name = constant.toString().toUpperCase();
                     if (name.contains("ACCEPTED")) accepted = constant;
@@ -301,35 +304,20 @@ public class Main {
                     if (name.contains("SUCCESSFULLY_LOADED") || name.equals("LOADED")) loaded = constant;
                 }
 
-                // 1. ACCEPTED
-                if (accepted != null) {
-                    sendResourcePackResponse(session, packetClass, packId, accepted);
-                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: ACCEPTED");
-                }
+                if (accepted != null) sendResourcePackResponse(session, packetClass, packId, accepted);
+                Thread.sleep(500);
 
-                Thread.sleep(600);
+                if (downloaded != null) sendResourcePackResponse(session, packetClass, packId, downloaded);
+                Thread.sleep(500);
 
-                // 2. DOWNLOADED
-                if (downloaded != null) {
-                    sendResourcePackResponse(session, packetClass, packId, downloaded);
-                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: DOWNLOADED");
-                }
+                if (loaded != null) sendResourcePackResponse(session, packetClass, packId, loaded);
+                Thread.sleep(1000);
 
-                Thread.sleep(600);
-
-                // 3. SUCCESSFULLY_LOADED
-                if (loaded != null) {
-                    sendResourcePackResponse(session, packetClass, packId, loaded);
-                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: SUCCESSFULLY_LOADED");
-                }
-
-                // Dajemy czas serwerowi na zaktualizowanie stanu gracza
-                Thread.sleep(1500);
                 resourcePackFinished = true;
-                System.out.println("[BOT] [RESOURCE PACK] Paczka przetworzona pomyślnie!");
+                System.out.println("[BOT] [RESOURCE PACK] Paczka przetworzona!");
 
             } catch (Exception e) {
-                System.err.println("[BOT] Błąd obsługi Resource Packa: " + e.getMessage());
+                System.err.println("[BOT] Błąd paczki zasobów: " + e.getMessage());
             }
         }).start();
     }
@@ -354,9 +342,7 @@ public class Main {
                                 if (className.contains("Serverbound") && className.contains("ResourcePack")) {
                                     try {
                                         Class<?> c = Class.forName(className);
-                                        if (Packet.class.isAssignableFrom(c)) {
-                                            return c;
-                                        }
+                                        if (Packet.class.isAssignableFrom(c)) return c;
                                     } catch (Throwable ignored) {}
                                 }
                             }
@@ -371,15 +357,11 @@ public class Main {
     private static Class<?> findStatusEnum(Class<?> packetClass) {
         for (Constructor<?> cons : packetClass.getConstructors()) {
             for (Class<?> param : cons.getParameterTypes()) {
-                if (param.isEnum()) {
-                    return param;
-                }
+                if (param.isEnum()) return param;
             }
         }
         for (Class<?> inner : packetClass.getDeclaredClasses()) {
-            if (inner.isEnum()) {
-                return inner;
-            }
+            if (inner.isEnum()) return inner;
         }
         return null;
     }
@@ -409,9 +391,7 @@ public class Main {
         try {
             Method getContent = packet.getClass().getMethod("getContent");
             Object content = getContent.invoke(packet);
-            if (content != null) {
-                return content.toString();
-            }
+            if (content != null) return content.toString();
         } catch (Exception ignored) {}
         return packet.toString();
     }
@@ -423,23 +403,19 @@ public class Main {
             Object[] actionConstants = actionTypeClass.getEnumConstants();
             if (actionConstants != null) {
                 for (Object c : actionConstants) {
-                    String name = c.toString().toUpperCase();
-                    if (name.contains("CLICK") || name.contains("PICKUP")) {
+                    if (c.toString().toUpperCase().contains("CLICK") || c.toString().toUpperCase().contains("PICKUP")) {
                         actionType = c;
                         break;
                     }
                 }
-                if (actionType == null && actionConstants.length > 0) {
-                    actionType = actionConstants[0];
-                }
+                if (actionType == null && actionConstants.length > 0) actionType = actionConstants[0];
             }
 
             Object containerAction = null;
             String[] actionClassNames = new String[] {
                 "org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction$ClickItemAction",
                 "org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction",
-                "org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction",
-                "org.geysermc.mcprotocollib.protocol.data.game.inventory.DefaultContainerAction"
+                "org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction"
             };
             for (String acName : actionClassNames) {
                 try {
@@ -452,9 +428,7 @@ public class Main {
                                 break;
                             }
                         }
-                        if (containerAction == null) {
-                            containerAction = constants[0];
-                        }
+                        if (containerAction == null) containerAction = constants[0];
                         break;
                     }
                 } catch (ClassNotFoundException ignored) {}
@@ -467,20 +441,6 @@ public class Main {
                     if (cons.getParameterCount() == 0) {
                         hashedStack = cons.newInstance();
                         break;
-                    } else if (cons.getParameterCount() == 1 && clickedItem != null && cons.getParameterTypes()[0].isAssignableFrom(clickedItem.getClass())) {
-                        hashedStack = cons.newInstance(clickedItem);
-                        break;
-                    }
-                }
-                if (hashedStack == null) {
-                    for (Constructor<?> cons : hashedStackClass.getConstructors()) {
-                        if (cons.getParameterCount() == 3) {
-                            hashedStack = cons.newInstance(0, 0, null);
-                            break;
-                        } else if (cons.getParameterCount() == 2) {
-                            hashedStack = cons.newInstance(0, 0);
-                            break;
-                        }
                     }
                 }
             } catch (ClassNotFoundException ignored) {}
@@ -497,7 +457,7 @@ public class Main {
                     if (p == int.class || p == Integer.class) {
                         if (i == 0) args[i] = containerId;
                         else if (i == 2) args[i] = slotIndex;
-                        else args[i] = 0;
+                        else args[i] = sequenceCounter.incrementAndGet();
                     } else if (actionType != null && p.isAssignableFrom(actionType.getClass())) {
                         args[i] = actionType;
                     } else if (containerAction != null && p.isAssignableFrom(containerAction.getClass())) {
@@ -528,8 +488,6 @@ public class Main {
             if (packet != null) {
                 session.send((Packet) packet);
                 System.out.println("[BOT] Wysłano pakiet kliknięcia w slot " + slotIndex);
-            } else {
-                System.err.println("[BOT] Błąd: Nie odnaleziono pasującego konstruktora dla kliknięcia.");
             }
 
         } catch (Exception e) {
@@ -538,17 +496,12 @@ public class Main {
     }
 
     private static Session createSession(String host, int port, MinecraftProtocol protocol) throws Exception {
-        System.out.println("[BOT] Szukam odpowiedniej klasy w pliku JAR...");
         List<Class<?>> classes = scanMcProtocolLibClasses();
-        System.out.println("[BOT] Przeszukano " + classes.size() + " klas związanych z sesją.");
-
         classes.sort((c1, c2) -> {
             String n1 = c1.getSimpleName();
             String n2 = c2.getSimpleName();
             if (n1.contains("ClientNetworkSession")) return -1;
             if (n2.contains("ClientNetworkSession")) return 1;
-            if (n1.contains("ClientSession")) return -1;
-            if (n2.contains("ClientSession")) return 1;
             return n1.compareTo(n2);
         });
 
@@ -557,13 +510,11 @@ public class Main {
                 Session session = tryInstantiateSessionClass(clazz, host, port, protocol);
                 if (session != null) {
                     injectExecutors(session);
-                    System.out.println("[BOT] Utworzono sesję z klasy: " + clazz.getName());
                     return session;
                 }
             }
         }
-
-        throw new IllegalStateException("Nie odnaleziono odpowiedniej klasy sesji w bibliotece MCProtocolLib.");
+        throw new IllegalStateException("Nie odnaleziono klasy sesji w bibliotece MCProtocolLib.");
     }
 
     private static Session tryInstantiateSessionClass(Class<?> clazz, String host, int port, MinecraftProtocol protocol) {
@@ -571,47 +522,29 @@ public class Main {
             Class<?>[] types = cons.getParameterTypes();
             Object[] args = new Object[types.length];
 
-            boolean hostAssigned = false;
-            boolean portAssigned = false;
+            boolean hostAssigned = false, portAssigned = false;
 
             for (int i = 0; i < types.length; i++) {
                 Class<?> t = types[i];
-
                 if (Executor.class.isAssignableFrom(t) || t.getName().contains("Executor")) {
                     args[i] = Executors.newSingleThreadExecutor();
                 } else if (Proxy.class.isAssignableFrom(t)) {
                     args[i] = Proxy.NO_PROXY;
                 } else if (t == String.class) {
-                    if (!hostAssigned) {
-                        args[i] = host;
-                        hostAssigned = true;
-                    } else {
-                        args[i] = null;
-                    }
+                    if (!hostAssigned) { args[i] = host; hostAssigned = true; }
+                    else args[i] = null;
                 } else if (t == int.class || t == Integer.class) {
-                    if (!portAssigned) {
-                        args[i] = port;
-                        portAssigned = true;
-                    } else {
-                        args[i] = 0;
-                    }
+                    if (!portAssigned) { args[i] = port; portAssigned = true; }
+                    else args[i] = 0;
                 } else if (t.isAssignableFrom(protocol.getClass()) || t.getName().contains("Protocol")) {
                     args[i] = protocol;
                 } else if (SocketAddress.class.isAssignableFrom(t) || InetSocketAddress.class.isAssignableFrom(t)) {
-                    if (!hostAssigned) {
-                        args[i] = new InetSocketAddress(host, port);
-                        hostAssigned = true;
-                        portAssigned = true;
-                    } else {
-                        args[i] = null;
-                    }
+                    if (!hostAssigned) { args[i] = new InetSocketAddress(host, port); hostAssigned = true; portAssigned = true; }
+                    else args[i] = null;
                 } else if (t == boolean.class || t == Boolean.class) {
                     args[i] = false;
                 } else if (t.isPrimitive()) {
-                    if (t == long.class) args[i] = 0L;
-                    else if (t == float.class) args[i] = 0.0f;
-                    else if (t == double.class) args[i] = 0.0d;
-                    else args[i] = 0;
+                    args[i] = 0;
                 } else {
                     args[i] = null;
                 }
@@ -620,12 +553,9 @@ public class Main {
             try {
                 cons.setAccessible(true);
                 Object obj = cons.newInstance(args);
-                if (obj instanceof Session) {
-                    return (Session) obj;
-                }
+                if (obj instanceof Session) return (Session) obj;
             } catch (Throwable ignored) {}
         }
-
         return null;
     }
 
@@ -637,9 +567,7 @@ public class Main {
                 if (Executor.class.isAssignableFrom(f.getType()) || f.getType().getName().contains("Executor")) {
                     try {
                         f.setAccessible(true);
-                        if (f.get(obj) == null) {
-                            f.set(obj, Executors.newSingleThreadExecutor());
-                        }
+                        if (f.get(obj) == null) f.set(obj, Executors.newSingleThreadExecutor());
                     } catch (Throwable ignored) {}
                 }
             }
@@ -676,9 +604,7 @@ public class Main {
                     }
                 }
             }
-        } catch (Throwable e) {
-            System.err.println("[BOT] Błąd skanowania klas: " + e.getMessage());
-        }
+        } catch (Throwable ignored) {}
         return classes;
     }
 
@@ -707,11 +633,8 @@ public class Main {
                 String[] srvData = attrs.get("SRV").get().toString().split(" ");
                 if (srvData.length >= 4) {
                     String targetHost = srvData[3];
-                    if (targetHost.endsWith(".")) {
-                        targetHost = targetHost.substring(0, targetHost.length() - 1);
-                    }
-                    String targetPort = srvData[2];
-                    return new String[]{targetHost, targetPort};
+                    if (targetHost.endsWith(".")) targetHost = targetHost.substring(0, targetHost.length() - 1);
+                    return new String[]{targetHost, srvData[2]};
                 }
             }
         } catch (Exception ignored) {}
