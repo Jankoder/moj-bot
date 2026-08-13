@@ -42,10 +42,19 @@ public class Main {
     private static volatile boolean compassClicked = false;
     private static final AtomicInteger sequenceCounter = new AtomicInteger(0);
 
+    // Pozycja i celownik bota
+    private static volatile double currentX = 0;
+    private static volatile double currentY = 64;
+    private static volatile double currentZ = 0;
+    private static volatile float currentYaw = 0;
+    private static volatile float currentPitch = 0;
+
+    // Do blokowania spamu na czacie
+    private static volatile String lastChatMessage = "";
+
     public static void main(String[] args) {
         System.out.println("=================================");
         System.out.println("   AUTORSKI BOT AFK 1.21.x       ");
-        System.out.println("   (MCProtocolLib + Maven)       ");
         System.out.println("=================================");
 
         while (true) {
@@ -54,7 +63,7 @@ public class Main {
                 String targetHost = srv[0];
                 int targetPort = Integer.parseInt(srv[1]);
 
-                System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
+                System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako: " + USERNAME + "...");
 
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
                 Session session = createSession(targetHost, targetPort, protocol);
@@ -62,6 +71,7 @@ public class Main {
                 activeContainerId = -1;
                 resourcePackFinished = false;
                 compassClicked = false;
+                lastChatMessage = "";
 
                 session.addListener(new SessionAdapter() {
                     @Override
@@ -69,9 +79,14 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
+                            // Zapamiętanie pozycji wysłanej z serwera
+                            if (packetName.contains("PlayerPosition") || packetName.contains("PosRot")) {
+                                updatePositionFromPacket(packet);
+                            }
+
                             // 1. PACZKA ZASOBÓW
                             if (packetName.contains("ResourcePack")) {
-                                System.out.println("[BOT] [RESOURCE PACK] Wykryto żądanie paczki zasobów...");
+                                System.out.println("[BOT] [RESOURCE PACK] Obsługa paczki zasobów...");
                                 handleResourcePack(session, packet);
                             }
 
@@ -82,11 +97,11 @@ public class Main {
                                 
                                 if (compassClicked && cid > 0) {
                                     activeContainerId = cid;
-                                    System.out.println("[BOT] [GUI] Otwarto menu wyboru serwera! ID kontenera: " + activeContainerId);
+                                    System.out.println("[BOT] [GUI] Otwarto menu! ID: " + activeContainerId);
                                 }
                             }
 
-                            // 3. KLIKNIĘCIE W ANARCHIA SMP
+                            // 3. KLIKNIĘCIE W TRYB
                             if (packetName.contains("ContainerSetContent") || packetName.contains("WindowItems") || packetName.contains("SetContainerContent")) {
                                 if (activeContainerId != -1) {
                                     Method getContainerId = packet.getClass().getMethod("getContainerId");
@@ -100,11 +115,9 @@ public class Main {
                                             if (item != null) {
                                                 String itemStr = item.toString().toLowerCase();
                                                 if (itemStr.contains("anarchia") || itemStr.contains("smp") || itemStr.contains("graj")) {
-                                                    System.out.println("[BOT] [GUI] Znaleziono AnarchiaSMP w slocie nr " + slotIndex + "! Klikam...");
-                                                    
+                                                    System.out.println("[BOT] [GUI] Klikam AnarchiaSMP w slocie " + slotIndex);
                                                     Thread.sleep(500);
                                                     clickSlot(session, activeContainerId, slotIndex, item);
-                                                    
                                                     activeContainerId = -1;
                                                     break;
                                                 }
@@ -115,11 +128,13 @@ public class Main {
                                 }
                             }
 
-                            // 4. CZAT SERWERA
+                            // 4. CZAT SERWERA (BEZ SPAMU)
                             if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
-                                String chatText = extractChatText(packet);
-                                if (chatText.length() > 0 && !chatText.contains("ActionBar")) {
-                                    System.out.println("[BOT] [CZAT] " + chatText);
+                                String cleanedText = cleanChatMessage(packet.toString());
+
+                                if (!cleanedText.isEmpty() && !cleanedText.equals(lastChatMessage)) {
+                                    lastChatMessage = cleanedText;
+                                    System.out.println("[BOT] [CZAT] " + cleanedText);
                                 }
                             }
 
@@ -128,12 +143,12 @@ public class Main {
 
                     @Override
                     public void disconnected(DisconnectedEvent event) {
-                        System.out.println("[BOT] Rozłączono z serwerem. Powód: " + event.getReason());
+                        System.out.println("[BOT] Rozłączono. Powód: " + event.getReason());
                     }
                 });
 
                 connectSession(session);
-                System.out.println("[BOT] [OK] Wysłano żądanie połączenia...");
+                System.out.println("[BOT] [OK] Połączono!");
 
                 startBotSequence(session);
 
@@ -155,10 +170,8 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                // KROK 1: Wejście do gry i logowanie
-                System.out.println("[BOT] Czekam 2 sekundy na połączenie z lobby...");
+                // KROK 1: Wejście i logowanie
                 Thread.sleep(2000);
-
                 if (!session.isConnected()) return;
 
                 sendBrandPayload(session);
@@ -166,8 +179,8 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // KROK 2: Oczekiwanie na paczkę zasobów
-                System.out.println("[BOT] Czekam na załadowanie paczki zasobów...");
+                // KROK 2: Czekanie na paczkę
+                System.out.println("[BOT] Czekam na przetworzenie paczki zasobów...");
                 long startWait = System.currentTimeMillis();
                 while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 15000)) {
                     Thread.sleep(300);
@@ -175,50 +188,46 @@ public class Main {
 
                 if (!session.isConnected()) return;
 
-                // WYMAGANE 20 SEKUND CZEKANIA NA PEŁNE ZAŁADOWANIE MAPY/GWARANCJĘ STABILNOŚCI
-                System.out.println("[BOT] Paczka pobrana! Odczekuję 20 sekund na pełne załadowanie terenu i zasobów...");
-                for (int i = 20; i > 0; i -= 5) {
-                    System.out.println("[BOT] Czekam na ustabilizowanie: zostało " + i + "s...");
-                    Thread.sleep(5000);
-                    if (!session.isConnected()) return;
-                }
+                System.out.println("[BOT] Odczekuję 5 sekund na stabilizację...");
+                Thread.sleep(5000);
 
-                System.out.println("[BOT] Stan gry ustabilizowany. Rozpoczynam działanie!");
-
-                // KROK 3: Przełączenie slotu na kompas (slot 4 = 5. okienko)
-                System.out.println("[BOT] Przełączam na slot 4 (kompas)...");
+                // KROK 3: Wybór kompasu w dłoni (slot 4)
+                System.out.println("[BOT] Wybieram slot 4 (kompas)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
                 Thread.sleep(1000);
 
-                // KROK 4: SEKWENCJA RUCHÓW (Lewo -> Prawo -> Prostowanie -> Chód przez 8s)
-                double x = 0, y = 64, z = 0;
-
-                System.out.println("[BOT] [RUCH] Obracam się w lewo...");
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, -90.0f, 0.0f));
+                // KROK 4: TWOJA SEKWENCJA RUCHU
+                System.out.println("[BOT] [RUCH] Obracam lekko w prawo...");
+                currentYaw = 45.0f;
+                currentPitch = 0.0f;
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
                 Thread.sleep(600);
 
-                System.out.println("[BOT] [RUCH] Obracam się w prawo...");
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 90.0f, 0.0f));
+                System.out.println("[BOT] [RUCH] Obracam lekko w lewo...");
+                currentYaw = -45.0f;
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
                 Thread.sleep(600);
 
                 System.out.println("[BOT] [RUCH] Prostuję wzrok...");
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
+                currentYaw = 0.0f;
+                currentPitch = 0.0f;
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
                 Thread.sleep(400);
 
-                System.out.println("[BOT] [RUCH] Idę do przodu przez 8 sekund dla pewności...");
+                System.out.println("[BOT] [RUCH] Idę do przodu przez 8 sekund...");
                 long walkStartTime = System.currentTimeMillis();
                 while (System.currentTimeMillis() - walkStartTime < 8000) {
                     if (!session.isConnected()) return;
-                    z += 0.15;
-                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
+                    currentZ += 0.2; // marsz do przodu
+                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
                     Thread.sleep(200);
                 }
 
-                System.out.println("[BOT] Sekwencja chodzenia ukończona.");
+                System.out.println("[BOT] [RUCH] Marsz ukończony!");
                 Thread.sleep(500);
 
-                // KROK 5: Użycie kompasu (kliknięcie PRAWYM przyciskiem myszy)
-                System.out.println("[BOT] Klikam kompasem w dłoni (Użycie przedmiotu)...");
+                // KROK 5: Użycie kompasu
+                System.out.println("[BOT] Klikam kompasem w dłoni...");
                 compassClicked = true;
                 
                 int seq = sequenceCounter.incrementAndGet();
@@ -226,16 +235,49 @@ public class Main {
                 sendUseItemPacket(session, seq);
 
             } catch (Exception e) {
-                System.err.println("[BOT] Błąd w sekwencji: " + e.getMessage());
+                System.err.println("[BOT] Błąd sekwencji: " + e.getMessage());
             }
         }).start();
     }
 
+    private static String cleanChatMessage(String raw) {
+        StringBuilder sb = new StringBuilder();
+        int idx = 0;
+        while ((idx = raw.indexOf("content=\"", idx)) != -1) {
+            idx += 9;
+            int end = raw.indexOf("\"", idx);
+            if (end != -1) {
+                String part = raw.substring(idx, end);
+                if (!part.isEmpty()) {
+                    sb.append(part);
+                }
+                idx = end;
+            }
+        }
+        String result = sb.toString().trim();
+        return result.isEmpty() ? "" : result;
+    }
+
+    private static void updatePositionFromPacket(Packet packet) {
+        try {
+            for (Method m : packet.getClass().getMethods()) {
+                if (m.getParameterCount() == 0) {
+                    String name = m.getName().toLowerCase();
+                    if (name.equals("getx")) currentX = (double) m.invoke(packet);
+                    if (name.equals("gety")) currentY = (double) m.invoke(packet);
+                    if (name.equals("getz")) currentZ = (double) m.invoke(packet);
+                    if (name.equals("getyaw")) currentYaw = (float) m.invoke(packet);
+                    if (name.equals("getpitch")) currentPitch = (float) m.invoke(packet);
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
     private static void sendUseItemPacket(Session session, int sequence) {
         try {
-            session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, sequence, 0.0f, 0.0f));
+            session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, sequence, currentYaw, currentPitch));
         } catch (Exception e) {
-            System.err.println("[BOT] Błąd podczas wysyłania ServerboundUseItemPacket: " + e.getMessage());
+            System.err.println("[BOT] Błąd ServerboundUseItemPacket: " + e.getMessage());
         }
     }
 
@@ -257,7 +299,6 @@ public class Main {
 
                     if (arg1 != null && pTypes[1] == byte[].class) {
                         session.send((Packet) cons.newInstance(arg1, data));
-                        System.out.println("[BOT] [VERIFY] Wysłano pakiet tożsamości klienta (minecraft:brand)");
                         return;
                     }
                 }
@@ -304,7 +345,6 @@ public class Main {
                 Thread.sleep(1000);
 
                 resourcePackFinished = true;
-                System.out.println("[BOT] [RESOURCE PACK] Paczka przetworzona!");
 
             } catch (Exception e) {
                 System.err.println("[BOT] Błąd paczki zasobów: " + e.getMessage());
@@ -375,15 +415,6 @@ public class Main {
                 }
             } catch (Exception ignored) {}
         }
-    }
-
-    private static String extractChatText(Packet packet) {
-        try {
-            Method getContent = packet.getClass().getMethod("getContent");
-            Object content = getContent.invoke(packet);
-            if (content != null) return content.toString();
-        } catch (Exception ignored) {}
-        return packet.toString();
     }
 
     private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
@@ -477,7 +508,6 @@ public class Main {
 
             if (packet != null) {
                 session.send((Packet) packet);
-                System.out.println("[BOT] Wysłano pakiet kliknięcia w slot " + slotIndex);
             }
 
         } catch (Exception e) {
@@ -504,7 +534,7 @@ public class Main {
                 }
             }
         }
-        throw new IllegalStateException("Nie odnaleziono klasy sesji w bibliotece MCProtocolLib.");
+        throw new IllegalStateException("Nie odnaleziono klasy sesji.");
     }
 
     private static Session tryInstantiateSessionClass(Class<?> clazz, String host, int port, MinecraftProtocol protocol) {
