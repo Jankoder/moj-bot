@@ -14,31 +14,7 @@
     </properties>
 
     <repositories>
-        <!-- Główne repozytorium Geyser / MCProtocolLib -->
-        <repository>
-            <id>opencollab-main</id>
-            <url>https://repo.opencollab.dev/main/</url>
-            <releases>
-                <enabled>true</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
-        </repository>
-
-        <!-- Oficjalne repozytorium CodeMC (Lustro dla bibliotek MC) -->
-        <repository>
-            <id>codemc-repo</id>
-            <url>https://repo.codemc.io/repository/maven-public/</url>
-            <releases>
-                <enabled>true</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
-        </repository>
-
-        <!-- Zapasowe repozytorium JitPack -->
+        <!-- Wyłącznie JitPack - pobiera źródła bezpośrednio z repozytorium GitHub -->
         <repository>
             <id>jitpack.io</id>
             <url>https://jitpack.io</url>
@@ -47,9 +23,9 @@
 
     <dependencies>
         <dependency>
-            <groupId>org.geysermc.mcprotocollib</groupId>
-            <artifactId>protocol</artifactId>
-            <version>1.19.4-1-SNAPSHOT</version>
+            <groupId>com.github.GeyserMC</groupId>
+            <artifactId>MCProtocolLib</artifactId>
+            <version>v1.19.4-1</version>
         </dependency>
     </dependencies>
 
