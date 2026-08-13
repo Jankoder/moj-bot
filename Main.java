@@ -1,87 +1,146 @@
-import java.io.*;
-import java.net.*;
-import java.nio.charset.StandardCharsets;
+import org.geysermc.mcprotocollib.network.Session;
+import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
+import org.geysermc.mcprotocollib.network.event.session.PacketReceivedEvent;
+import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
+import org.geysermc.mcprotocollib.network.tcp.TcpClientSession;
+import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
+
+import java.util.Collections;
 import java.util.Hashtable;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
 import javax.naming.directory.InitialDirContext;
 
 public class Main {
+
+    private static final String HOST = "anarchia.gg";
+    private static final String USERNAME = "jankoder2";
+    private static final String PASSWORD = "Krokodyl12!";
+
     public static void main(String[] args) {
         System.out.println("=================================");
         System.out.println("   AUTORSKI BOT AFK 1.21.4      ");
+        System.out.println("   (MCProtocolLib + Maven)      ");
         System.out.println("=================================");
-        
-        String inputHost = "anarchia.gg";
-        String username = "jankoder2"; // Twój nick
 
         while (true) {
             try {
-                // Odczytanie SRV (zwraca tablice: [0] = host, [1] = port)
-                String[] srv = resolveSrv(inputHost);
+                // Rozwiązywanie ukrytego adresu SRV
+                String[] srv = resolveSrv(HOST);
                 String targetHost = srv[0];
                 int targetPort = Integer.parseInt(srv[1]);
 
-                System.out.println("[BOT] Lacznie z: " + targetHost + ":" + targetPort + " jako nick: " + username + "...");
+                System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
-                Socket socket = new Socket();
-                socket.connect(new InetSocketAddress(targetHost, targetPort), 10000);
-                
-                DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-                DataInputStream in = new DataInputStream(socket.getInputStream());
+                // Tworzenie protokołu oraz sesji
+                MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
+                Session client = new TcpClientSession(targetHost, targetPort, protocol);
 
-                // Handshake Packet (Minecraft 1.21.4 = protocol 768)
-                ByteArrayOutputStream handshakeBytes = new ByteArrayOutputStream();
-                DataOutputStream handshakeOut = new DataOutputStream(handshakeBytes);
-                writeVarInt(handshakeOut, 0x00);
-                writeVarInt(handshakeOut, 768);
-                writeString(handshakeOut, inputHost);
-                handshakeOut.writeShort(targetPort);
-                writeVarInt(handshakeOut, 2); // State: Login
-                sendPacket(out, handshakeBytes.toByteArray());
+                client.addListener(new SessionAdapter() {
+                    private boolean loggedIn = false;
 
-                // Login Start Packet
-                ByteArrayOutputStream loginBytes = new ByteArrayOutputStream();
-                DataOutputStream loginOut = new DataOutputStream(loginBytes);
-                writeVarInt(loginOut, 0x00);
-                writeString(loginOut, username);
-                loginOut.writeLong(0);
-                loginOut.writeLong(0);
-                sendPacket(out, loginBytes.toByteArray());
+                    @Override
+                    public void packetReceived(PacketReceivedEvent event) {
+                        String packetName = event.getPacket().getClass().getSimpleName();
 
-                System.out.println("[BOT] [OK] Polaczono pomyslnie z serwerem!");
-                System.out.println("[BOT] Utrzymuje polaczenie AFK...");
-
-                // Petla czytajaca dane z serwera
-                while (!socket.isClosed()) {
-                    int length = readVarInt(in);
-                    if (length < 0) {
-                        System.out.println("[BOT] Serwer zamknal polaczenie (kick/rozlaczenie).");
-                        break;
+                        // Reakcja po wejściu na serwer
+                        if ((packetName.contains("Login") || packetName.contains("Join") || packetName.contains("PlayerPosition")) && !loggedIn) {
+                            loggedIn = true;
+                            System.out.println("[BOT] [OK] Połączono z serwerem!");
+                            
+                            // Uruchomienie pełnej sekwencji
+                            executeBotSequence(client);
+                        }
                     }
-                    byte[] packetData = new byte[length];
-                    in.readFully(packetData);
-                    Thread.sleep(50);
+
+                    @Override
+                    public void disconnected(DisconnectedEvent event) {
+                        System.out.println("[BOT] Rozłączono z serwerem. Powód: " + event.getReason());
+                    }
+                });
+
+                client.connect();
+
+                // Utrzymanie wątku
+                while (client.isConnected()) {
+                    Thread.sleep(1000);
                 }
-            } catch (SocketTimeoutException e) {
-                System.err.println("[BOT] [BLAD TIMEOUT] Serwer nie odpowiedzial.");
-            } catch (UnknownHostException e) {
-                System.err.println("[BOT] [BLAD DOMENY] Nie odnaleziono IP dla " + inputHost);
-            } catch (ConnectException e) {
-                System.err.println("[BOT] [BLAD POLACZENIA] Odmowa polaczenia na wybranym porcie.");
+
             } catch (Exception e) {
-                System.err.println("[BOT] [SZCZEGOLY BLADU]: " + e.getClass().getSimpleName() + " - " + e.getMessage());
-                e.printStackTrace(System.err);
+                System.err.println("[BOT] Błąd połączenia: " + e.getMessage());
             }
 
-            System.out.println("[BOT] Odczekam 10 sekund przed kolejna proba...");
+            System.out.println("[BOT] Odczekam 10 sekund przed ponowną próbą...");
             try {
                 Thread.sleep(10000);
             } catch (InterruptedException ignored) {}
         }
     }
 
-    // Rekordy SRV bez uzywania dodatkowych klas
+    // Sekwencja: Logowanie -> Ruchy -> Użycie Kompasu -> Wybór AnarchiaSMP
+    private static void executeBotSequence(Session session) {
+        new Thread(() -> {
+            try {
+                // Krok 1: Wpisanie komendy /login
+                Thread.sleep(2000);
+                System.out.println("[BOT] Wysyłam komendę: /login " + PASSWORD);
+                session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
+
+                // Krok 2: Weryfikacja ruchowa (obroty + chód)
+                Thread.sleep(2500);
+                System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
+                
+                double x = 0, y = 64, z = 0;
+
+                // Lekki obrót w lewo i prawo
+                session.send(new ServerboundMovePlayerPosRotPacket(true, x, y, z, -30.0f, 0.0f));
+                Thread.sleep(500);
+                session.send(new ServerboundMovePlayerPosRotPacket(true, x, y, z, 30.0f, 0.0f));
+                Thread.sleep(500);
+
+                // Chód do przodu przez ok. 6 sekund
+                System.out.println("[BOT] Idę do przodu przez 6 sekund...");
+                for (int i = 0; i < 12; i++) {
+                    z += 0.5;
+                    session.send(new ServerboundMovePlayerPosRotPacket(true, x, y, z, 0.0f, 0.0f));
+                    Thread.sleep(500);
+                }
+
+                // Krok 3: Kliknięcie kompasu w dłoni (Prawy Przycisk Myszy)
+                System.out.println("[BOT] Używam kompasu (prawy klik)...");
+                session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0));
+                
+                // Krok 4: Wybór trybu AnarchiaSMP z otwieranego menu GUI
+                Thread.sleep(1500);
+                System.out.println("[BOT] Klikam w ikonę AnarchiaSMP w menu GUI...");
+                
+                // Slot 10 lub 11 zazwyczaj odpowiada pierwszej ikonie w serwerowych menu lobby
+                int targetSlot = 10; 
+                session.send(new ServerboundContainerClickPacket(
+                        1, 
+                        0, 
+                        targetSlot, 
+                        0, 
+                        ContainerActionType.CLICK_ITEM, 
+                        null, 
+                        Collections.emptyMap()
+                ));
+
+                System.out.println("[BOT] Sekwencja zakończona! Bot dołączył na AnarchiaSMP i utrzymuje AFK.");
+
+            } catch (Exception e) {
+                System.err.println("[BOT] Błąd podczas wykonywania sekwencji: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    // Pobieranie rekordów DNS SRV
     private static String[] resolveSrv(String host) {
         try {
             Hashtable<String, String> env = new Hashtable<>();
@@ -102,39 +161,5 @@ public class Main {
             }
         } catch (Exception ignored) {}
         return new String[]{host, "25565"};
-    }
-
-    private static void sendPacket(DataOutputStream out, byte[] data) throws IOException {
-        writeVarInt(out, data.length);
-        out.write(data);
-        out.flush();
-    }
-
-    private static void writeVarInt(DataOutputStream out, int value) throws IOException {
-        while ((value & -128) != 0) {
-            out.write(value & 127 | 128);
-            value >>>= 7;
-        }
-        out.write(value);
-    }
-
-    private static int readVarInt(DataInputStream in) throws IOException {
-        int numRead = 0;
-        int result = 0;
-        byte read;
-        do {
-            read = in.readByte();
-            int value = (read & 127);
-            result |= (value << (7 * numRead));
-            numRead++;
-            if (numRead > 5) throw new IOException("VarInt za duzy");
-        } while ((read & 128) != 0);
-        return result;
-    }
-
-    private static void writeString(DataOutputStream out, String value) throws IOException {
-        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
-        writeVarInt(out, bytes.length);
-        out.write(bytes);
     }
 }
