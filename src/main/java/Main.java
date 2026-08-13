@@ -9,6 +9,7 @@ import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundChatCommandPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 
 import java.lang.reflect.Constructor;
@@ -35,6 +36,7 @@ public class Main {
     private static final String PASSWORD = "Krokodyl12!";
 
     private static volatile int activeContainerId = -1;
+    private static volatile boolean waitingForGui = false;
 
     public static void main(String[] args) {
         System.out.println("=================================");
@@ -54,6 +56,7 @@ public class Main {
                 Session session = createSession(targetHost, targetPort, protocol);
 
                 activeContainerId = -1;
+                waitingForGui = false;
 
                 session.addListener(new SessionAdapter() {
                     @Override
@@ -61,15 +64,20 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
+                            // Podgląd pakietów w konsoli podczas oczekiwania na menu
+                            if (waitingForGui) {
+                                System.out.println("[BOT] [ODBIEG-PAKIET] -> " + packetName);
+                            }
+
                             // 1. Wykrywanie otwarcia okna (menu / kompas)
-                            if (packetName.contains("OpenScreen") || packetName.contains("ContainerOpen")) {
+                            if (packetName.contains("OpenScreen") || packetName.contains("ContainerOpen") || packetName.contains("OpenWindow")) {
                                 Method getContainerId = packet.getClass().getMethod("getContainerId");
                                 activeContainerId = (int) getContainerId.invoke(packet);
-                                System.out.println("[BOT] [GUI] Otwarto menu ekwipunku. ID kontenera: " + activeContainerId);
+                                System.out.println("[BOT] [GUI] Otwarto menu ekwipunku! ID kontenera: " + activeContainerId);
                             }
 
                             // 2. Wykrywanie zawartości okna i szukanie "AnarchiaSMP"
-                            if (packetName.contains("ContainerSetContent") || packetName.contains("WindowItems")) {
+                            if (packetName.contains("ContainerSetContent") || packetName.contains("WindowItems") || packetName.contains("SetContainerContent")) {
                                 if (activeContainerId != -1) {
                                     Method getContainerId = packet.getClass().getMethod("getContainerId");
                                     int id = (int) getContainerId.invoke(packet);
@@ -81,12 +89,13 @@ public class Main {
                                         for (Object item : items) {
                                             if (item != null) {
                                                 String itemStr = item.toString().toLowerCase();
-                                                if (itemStr.contains("anarchia") || itemStr.contains("anarchiasmp")) {
+                                                if (itemStr.contains("anarchia") || itemStr.contains("anarchiasmp") || itemStr.contains("smp")) {
                                                     System.out.println("[BOT] [GUI] Znaleziono 'AnarchiaSMP' w slocie numer " + slotIndex + "!");
                                                     
                                                     clickSlot(session, activeContainerId, slotIndex, item);
                                                     
                                                     activeContainerId = -1;
+                                                    waitingForGui = false;
                                                     break;
                                                 }
                                             }
@@ -149,14 +158,18 @@ public class Main {
                 Thread.sleep(300);
 
                 System.out.println("[BOT] Idę do przodu przez dokładnie 6 sekund...");
-                // 20 kroków * 300 ms = 6000 ms (6 sekund)
                 for (int i = 0; i < 20; i++) {
-                    z += 0.2; // płynny ruch do przodu
+                    z += 0.2;
                     session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
                     Thread.sleep(300);
                 }
 
+                System.out.println("[BOT] Wybieram slot 0 w ekwipunku...");
+                session.send(new ServerboundSetCarriedItemPacket(0));
+                Thread.sleep(500);
+
                 System.out.println("[BOT] Używam kompasu w dłoni...");
+                waitingForGui = true;
                 session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
 
                 System.out.println("[BOT] Kompas został użyty. Oczekuję na menu serwera...");
