@@ -14,22 +14,18 @@
     </properties>
 
     <repositories>
-        <!-- Prawidłowe adresy repozytoriów OpenCollab -->
+        <!-- Oficjalne repozytorium JitPack, gdzie mieszkają stabilne wersje MCProtocolLib -->
         <repository>
-            <id>opencollab-releases</id>
-            <url>https://repo.opencollab.dev/maven-releases/</url>
-        </repository>
-        <repository>
-            <id>opencollab-snapshots</id>
-            <url>https://repo.opencollab.dev/maven-snapshots/</url>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
         </repository>
     </repositories>
 
     <dependencies>
         <dependency>
-            <groupId>org.geysermc.mcprotocollib</groupId>
-            <artifactId>protocol</artifactId>
-            <version>1.21.4</version>
+            <groupId>com.github.GeyserMC</groupId>
+            <artifactId>MCProtocolLib</artifactId>
+            <version>1.21.4-1</version>
         </dependency>
     </dependencies>
 
