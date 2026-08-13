@@ -80,7 +80,7 @@ public class Main {
                             String packetName = packet.getClass().getSimpleName();
 
                             // 0. POTWIERDZANIE TELEPORTACJI I AKTUALIZACJA POZYCJI
-                            if (packetName.contains("PlayerPosition") || packetName.contains("PosRot")) {
+                            if (packetName.contains("PlayerPosition") || packetName.contains("PosRot") || packetName.contains("LookAt")) {
                                 handlePlayerPositionPacket(session, packet);
                             }
 
@@ -169,17 +169,37 @@ public class Main {
 
     private static void handlePlayerPositionPacket(Session session, Packet packet) {
         try {
+            boolean updated = false;
             for (Method m : packet.getClass().getMethods()) {
                 if (m.getParameterCount() == 0) {
                     String name = m.getName().toLowerCase();
-                    if (name.equals("getx")) currentX = (double) m.invoke(packet);
-                    if (name.equals("gety")) currentY = (double) m.invoke(packet);
-                    if (name.equals("getz")) currentZ = (double) m.invoke(packet);
-                    if (name.equals("getyaw")) currentYaw = (float) m.invoke(packet);
-                    if (name.equals("getpitch")) currentPitch = (float) m.invoke(packet);
+                    if (name.equals("getx") || name.equals("x")) {
+                        Object val = m.invoke(packet);
+                        if (val instanceof Double) { currentX = (Double) val; updated = true; }
+                    }
+                    if (name.equals("gety") || name.equals("y")) {
+                        Object val = m.invoke(packet);
+                        if (val instanceof Double) { currentY = (Double) val; updated = true; }
+                    }
+                    if (name.equals("getz") || name.equals("z")) {
+                        Object val = m.invoke(packet);
+                        if (val instanceof Double) { currentZ = (Double) val; updated = true; }
+                    }
+                    if (name.equals("getyaw") || name.equals("yaw")) {
+                        Object val = m.invoke(packet);
+                        if (val instanceof Float) currentYaw = (Float) val;
+                    }
+                    if (name.equals("getpitch") || name.equals("pitch")) {
+                        Object val = m.invoke(packet);
+                        if (val instanceof Float) currentPitch = (Float) val;
+                    }
                 }
             }
-            positionReceived = true;
+
+            if (updated && !positionReceived) {
+                positionReceived = true;
+                System.out.printf("[BOT] Odczytano pozycję: X=%.2f, Y=%.2f, Z=%.2f\n", currentX, currentY, currentZ);
+            }
 
             // Confirm Teleportation Packet
             for (Method m : packet.getClass().getMethods()) {
@@ -231,7 +251,7 @@ public class Main {
 
                 // Czekamy na pierwszą pozycję ze świata
                 startWait = System.currentTimeMillis();
-                while (!positionReceived && (System.currentTimeMillis() - startWait < 5000)) {
+                while (!positionReceived && (System.currentTimeMillis() - startWait < 6000)) {
                     if (!session.isConnected()) return;
                     Thread.sleep(100);
                 }
@@ -239,7 +259,7 @@ public class Main {
                 Thread.sleep(1000);
                 if (!session.isConnected()) return;
 
-                // KROK 3: ZALICZANIE WERYFIKACJI RUCHU (20 Hz z obracaniem głowy)
+                // KROK 3: ZALICZANIE WERYFIKACJI RUCHU (20 Hz, 8 sekund, machanie głową ±15°)
                 performMovementVerification(session);
 
                 if (!session.isConnected()) return;
@@ -263,20 +283,20 @@ public class Main {
     }
 
     private static void performMovementVerification(Session session) {
-        System.out.println("[BOT] [RUCH] Rozpoczynam płynną weryfikację ruchu (20 Hz, kręcenie głową)...");
+        System.out.println("[BOT] [RUCH] Rozpoczynam weryfikację ruchu (8 sekund, machanie głową ±15°, 20 Hz)...");
 
         float baseYaw = currentYaw;
-        double speed = 0.12; // Umiarkowana prędkość chodzenia (~2.4 bloku/s)
+        double speed = 0.08; // Stabilna, wolna prędkość chodzenia (~1.6 bloku/sekundę)
 
-        // Wykonujemy 140 kroków po 50 ms (~7 sekund ciągłego ruchu)
-        for (int i = 0; i < 140; i++) {
+        // 160 kroków po 50 ms = dokładnie 8.0 sekund ruchu
+        for (int i = 0; i < 160; i++) {
             if (!session.isConnected()) return;
 
-            // Rozglądanie w lewo i prawo (odchylenie od -35° do +35°)
-            float yawOffset = (float) (Math.sin(i * 0.15) * 35.0);
+            // Łagodne rozglądanie się w lewo i prawo o maksymalnie 15 stopni
+            float yawOffset = (float) (Math.sin(i * 0.12) * 15.0);
             currentYaw = baseYaw + yawOffset;
 
-            // Obliczanie kierunku chodzenia z uwzględnieniem obrotu
+            // Wyliczanie nowej pozycji w kierunku marszu
             double rad = Math.toRadians(currentYaw);
             currentX -= Math.sin(rad) * speed;
             currentZ += Math.cos(rad) * speed;
@@ -285,13 +305,13 @@ public class Main {
             sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
 
             try {
-                Thread.sleep(50); // Dokładnie 20 ticków na sekundę
+                Thread.sleep(50); // Wyciskanie dokładnie 20 pakietów na sekundę (20 TPS)
             } catch (InterruptedException e) {
                 break;
             }
         }
 
-        System.out.println("[BOT] [RUCH] Zakończono sekwencję ruchu!");
+        System.out.println("[BOT] [RUCH] Zakończono 8-sekundową sekwencję ruchu!");
     }
 
     private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround) {
@@ -307,6 +327,9 @@ public class Main {
                     return;
                 } else if (types.length == 7 && types[0] == double.class) {
                     session.send((Packet) cons.newInstance(x, y, z, yaw, pitch, onGround, false));
+                    return;
+                } else if (types.length == 8) {
+                    session.send((Packet) cons.newInstance(x, y, z, yaw, pitch, onGround, false, false));
                     return;
                 }
             }
