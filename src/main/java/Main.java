@@ -123,16 +123,18 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                System.out.println("[BOT] Czekam 4 sekundy na załadowanie świata...");
-                Thread.sleep(4000);
+                // Skrócono czas oczekiwania na załadowanie z 4s na 1s
+                System.out.println("[BOT] Czekam 1 sekundę na załadowanie świata...");
+                Thread.sleep(1000);
 
                 if (!session.isConnected()) return;
 
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                System.out.println("[BOT] Czekam 4 sekundy po zalogowaniu na odblokowanie ekwipunku...");
-                Thread.sleep(4000);
+                // Skrócono czas oczekiwania po zalogowaniu z 4s na 1s
+                System.out.println("[BOT] Czekam 1 sekundę po zalogowaniu na odblokowanie ekwipunku...");
+                Thread.sleep(1000);
 
                 if (!session.isConnected()) return;
 
@@ -140,15 +142,15 @@ public class Main {
                 double x = 0, y = 64, z = 0;
 
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, -30.0f, 0.0f));
-                Thread.sleep(500);
+                Thread.sleep(300);
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
-                Thread.sleep(500);
+                Thread.sleep(300);
 
                 System.out.println("[BOT] Idę do przodu...");
                 for (int i = 0; i < 6; i++) {
                     z += 0.5;
                     session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
-                    Thread.sleep(500);
+                    Thread.sleep(300);
                 }
 
                 System.out.println("[BOT] Używam kompasu w dłoni...");
@@ -288,10 +290,12 @@ public class Main {
         List<Class<?>> classes = scanMcProtocolLibClasses();
         System.out.println("[BOT] Przeszukano " + classes.size() + " klas związanych z sesją.");
 
-        // Priority order: ClientSession / TcpClientSession / TcpSession
+        // Priorytet dla ClientNetworkSession oraz ClientSession
         classes.sort((c1, c2) -> {
             String n1 = c1.getSimpleName();
             String n2 = c2.getSimpleName();
+            if (n1.contains("ClientNetworkSession")) return -1;
+            if (n2.contains("ClientNetworkSession")) return 1;
             if (n1.contains("ClientSession")) return -1;
             if (n2.contains("ClientSession")) return 1;
             return n1.compareTo(n2);
@@ -311,21 +315,40 @@ public class Main {
     }
 
     private static Session tryInstantiateSessionClass(Class<?> clazz, String host, int port, MinecraftProtocol protocol) {
-        // Try Constructors
         for (Constructor<?> cons : clazz.getConstructors()) {
             Class<?>[] types = cons.getParameterTypes();
             Object[] args = new Object[types.length];
 
+            boolean hostAssigned = false;
+            boolean portAssigned = false;
+
             for (int i = 0; i < types.length; i++) {
                 Class<?> t = types[i];
+
                 if (t == String.class) {
-                    args[i] = host;
+                    if (!hostAssigned) {
+                        args[i] = host; // Pierwszy String to host docelowy
+                        hostAssigned = true;
+                    } else {
+                        args[i] = null; // Kolejne Stringi (np. bind host) ustawiamy na null
+                    }
                 } else if (t == int.class || t == Integer.class) {
-                    args[i] = port;
+                    if (!portAssigned) {
+                        args[i] = port; // Pierwszy int to port docelowy
+                        portAssigned = true;
+                    } else {
+                        args[i] = 0; // Kolejne inty (np. bind port) ustawiamy na 0
+                    }
                 } else if (t.isAssignableFrom(protocol.getClass()) || t.getName().contains("Protocol")) {
                     args[i] = protocol;
                 } else if (SocketAddress.class.isAssignableFrom(t) || InetSocketAddress.class.isAssignableFrom(t)) {
-                    args[i] = new InetSocketAddress(host, port);
+                    if (!hostAssigned) {
+                        args[i] = new InetSocketAddress(host, port);
+                        hostAssigned = true;
+                        portAssigned = true;
+                    } else {
+                        args[i] = null; // Kolejne adresy (np. bind address) na null
+                    }
                 } else if (t == boolean.class || t == Boolean.class) {
                     args[i] = false;
                 } else if (t.isPrimitive()) {
@@ -344,37 +367,7 @@ public class Main {
                 if (obj instanceof Session) {
                     return (Session) obj;
                 }
-            } catch (Throwable t) {
-                // Ignore exception and try next constructor/class
-            }
-        }
-
-        // Try Static Factory Methods
-        for (Method m : clazz.getDeclaredMethods()) {
-            if (Modifier.isStatic(m.getModifiers()) && Session.class.isAssignableFrom(m.getReturnType())) {
-                Class<?>[] types = m.getParameterTypes();
-                Object[] args = new Object[types.length];
-
-                for (int i = 0; i < types.length; i++) {
-                    Class<?> t = types[i];
-                    if (t == String.class) args[i] = host;
-                    else if (t == int.class || t == Integer.class) args[i] = port;
-                    else if (t.isAssignableFrom(protocol.getClass()) || t.getName().contains("Protocol")) args[i] = protocol;
-                    else if (SocketAddress.class.isAssignableFrom(t) || InetSocketAddress.class.isAssignableFrom(t)) args[i] = new InetSocketAddress(host, port);
-                    else if (t == boolean.class || t == Boolean.class) args[i] = false;
-                    else args[i] = null;
-                }
-
-                try {
-                    m.setAccessible(true);
-                    Object obj = m.invoke(null, args);
-                    if (obj instanceof Session) {
-                        return (Session) obj;
-                    }
-                } catch (Throwable t) {
-                    // Ignore exception
-                }
-            }
+            } catch (Throwable ignored) {}
         }
 
         return null;
