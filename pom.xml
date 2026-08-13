@@ -14,20 +14,18 @@
     </properties>
 
     <repositories>
-        <!-- Oficjalne repozytorium OpenCollab dla współczesnego MCProtocolLib -->
+        <!-- Prawidłowe adresy repozytoriów OpenCollab -->
         <repository>
-            <id>opencollab-main</id>
-            <url>https://repo.opencollab.dev/main/</url>
+            <id>opencollab-releases</id>
+            <url>https://repo.opencollab.dev/maven-releases/</url>
         </repository>
-        <!-- Zapasowe repozytorium CodeMC -->
         <repository>
-            <id>codemc-repo</id>
-            <url>https://repo.codemc.io/repository/maven-public/</url>
+            <id>opencollab-snapshots</id>
+            <url>https://repo.opencollab.dev/maven-snapshots/</url>
         </repository>
     </repositories>
 
     <dependencies>
-        <!-- Nowoczesna, oficjalna biblioteka MCProtocolLib dla wersji 1.21.4 -->
         <dependency>
             <groupId>org.geysermc.mcprotocollib</groupId>
             <artifactId>protocol</artifactId>
