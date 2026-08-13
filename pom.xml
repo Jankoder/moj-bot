@@ -15,12 +15,8 @@
 
     <repositories>
         <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
-        <repository>
             <id>opencollab-releases</id>
-            <url>https://repo.opencollab.dev/maven-releases/</url>
+            <url>https://repo.opencollab.dev/main/</url>
         </repository>
         <repository>
             <id>opencollab-snapshots</id>
@@ -30,8 +26,8 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.github.GeyserMC</groupId>
-            <artifactId>MCProtocolLib</artifactId>
+            <groupId>org.geysermc.mcprotocollib</groupId>
+            <artifactId>protocol</artifactId>
             <version>1.21.4-1</version>
         </dependency>
     </dependencies>
