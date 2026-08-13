@@ -95,7 +95,7 @@ public class Main {
                             if (packetName.contains("OpenScreen") || packetName.contains("ContainerOpen") || packetName.contains("OpenWindow")) {
                                 Method getContainerId = packet.getClass().getMethod("getContainerId");
                                 int cid = (int) getContainerId.invoke(packet);
-                                
+
                                 if (compassClicked && cid > 0) {
                                     activeContainerId = cid;
                                     System.out.println("[BOT] [GUI] Otwarto menu! ID: " + activeContainerId);
@@ -110,7 +110,7 @@ public class Main {
                                     if (id == activeContainerId) {
                                         Method getItems = packet.getClass().getMethod("getItems");
                                         Iterable<?> items = (Iterable<?>) getItems.invoke(packet);
-                                        
+
                                         int slotIndex = 0;
                                         for (Object item : items) {
                                             if (item != null) {
@@ -201,7 +201,6 @@ public class Main {
             session.send(confirmPacket);
         } catch (Exception e) {
             try {
-                // Alternatywna ścieżka klasy dla starszych wersji mcprotocollib
                 Class<?> confirmClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundAcceptTeleportationPacket");
                 Constructor<?> cons = confirmClass.getConstructor(int.class);
                 Packet confirmPacket = (Packet) cons.newInstance(teleportId);
@@ -244,21 +243,19 @@ public class Main {
                 // KROK 3: WERYFIKACJA RUCHU (Przesuwanie bota tak, aby serwer to zaliczył)
                 System.out.println("[BOT] [RUCH] Rozpoczynam zaliczanie weryfikacji pozycji...");
 
-                // Wykonujemy 6 wyraźnych kroków po skosie/do przodu z potwierdzeniem pozycji
                 for (int i = 1; i <= 6; i++) {
                     if (!session.isConnected()) return;
 
                     currentX += 0.3;
                     currentZ += 0.3;
 
-                    // Wysyłamy pakiet pozycji i obrotu (onGround = true)
                     session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
                     
-                    Thread.sleep(250); // Bezpieczny odstęp czasowy
+                    Thread.sleep(250);
                 }
 
                 System.out.println("[BOT] [RUCH] Wykonano sekwencję kroków!");
-                Thread.sleep(1500); // Odczekanie, aż serwer przetworzy ruch i zdejmie blokadę
+                Thread.sleep(1500);
                 if (!session.isConnected()) return;
 
                 // KROK 4: Wybór slotu i kompasu
@@ -442,17 +439,27 @@ public class Main {
 
     private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
         try {
-            Class<?> actionTypeClass = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType");
+            Class<?> actionTypeClass = null;
+            try {
+                actionTypeClass = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType");
+            } catch (ClassNotFoundException e) {
+                try {
+                    actionTypeClass = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickType");
+                } catch (ClassNotFoundException ignored) {}
+            }
+
             Object actionType = null;
-            Object[] actionConstants = actionTypeClass.getEnumConstants();
-            if (actionConstants != null) {
-                for (Object c : actionConstants) {
-                    if (c.toString().toUpperCase().contains("CLICK") || c.toString().toUpperCase().contains("PICKUP")) {
-                        actionType = c;
-                        break;
+            if (actionTypeClass != null) {
+                Object[] actionConstants = actionTypeClass.getEnumConstants();
+                if (actionConstants != null) {
+                    for (Object c : actionConstants) {
+                        if (c.toString().toUpperCase().contains("CLICK") || c.toString().toUpperCase().contains("PICKUP")) {
+                            actionType = c;
+                            break;
+                        }
                     }
+                    if (actionType == null && actionConstants.length > 0) actionType = actionConstants[0];
                 }
-                if (actionType == null && actionConstants.length > 0) actionType = actionConstants[0];
             }
 
             Object containerAction = null;
@@ -489,8 +496,26 @@ public class Main {
                 }
             } catch (ClassNotFoundException ignored) {}
 
+            Class<?> clickPacketClass = null;
+            String[] possiblePacketNames = new String[]{
+                "org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket",
+                "org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundClickContainerPacket",
+                "org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundContainerClickPacket"
+            };
+            for (String pName : possiblePacketNames) {
+                try {
+                    clickPacketClass = Class.forName(pName);
+                    break;
+                } catch (ClassNotFoundException ignored) {}
+            }
+
+            if (clickPacketClass == null) {
+                System.err.println("[BOT] Błąd: nie odnaleziono klasy pakietu kliknięcia kontenera.");
+                return;
+            }
+
             Object packet = null;
-            Constructor<?>[] constructors = ServerboundContainerClickPacket.class.getConstructors();
+            Constructor<?>[] constructors = clickPacketClass.getConstructors();
             for (Constructor<?> cons : constructors) {
                 Class<?>[] pTypes = cons.getParameterTypes();
                 Object[] args = new Object[pTypes.length];
