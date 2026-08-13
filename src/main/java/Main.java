@@ -242,11 +242,12 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                // KROK 1: Logowanie
+                // KROK 1: Logowanie i inicjalizacja informacji o kliencie
                 Thread.sleep(1500);
                 if (!session.isConnected()) return;
 
                 sendBrandPayload(session);
+                sendClientInformation(session); // Wysyłamy pakiet informacji o kliencie
 
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
@@ -303,39 +304,123 @@ public class Main {
     }
 
     private static void performMovementVerification(Session session) {
-        System.out.println("[BOT] [RUCH] Rozpoczynam weryfikację ruchu (8 sekund, machanie głową ±15°, 20 Hz)...");
+        System.out.println("[BOT] [RUCH] Rozpoczynam weryfikację ruchu (8 sekund, emulacja inputu WASD + obrót)...");
 
         float baseYaw = currentYaw;
-        double speed = 0.08; // Stabilna, wolna prędkość chodzenia (~1.6 bloku/sekundę)
+        double speed = 0.11; // Standardowa prędkość chodu (~2.2 bloku/s)
 
-        // 160 kroków po 50 ms = dokładnie 8.0 sekund ruchu
+        // 160 kroków po 50 ms = dokładnie 8.0 sekund ruchu (20 Hz)
         for (int i = 0; i < 160; i++) {
             if (!session.isConnected()) {
                 isVerifying = false;
                 return;
             }
 
-            // Łagodne rozglądanie się w lewo i prawo o maksymalnie 15 stopni
-            float yawOffset = (float) (Math.sin(i * 0.12) * 15.0);
+            // 1. Wysyłamy pakiet mówiący serwerowi, że wciskamy klawisz marszu w przód (W)
+            sendPlayerInputPacket(session, true, false, false, false, false, false);
+
+            // 2. Łagodne rozglądanie się w lewo i prawo o maksymalnie 18 stopni
+            float yawOffset = (float) (Math.sin(i * 0.1) * 18.0);
             currentYaw = baseYaw + yawOffset;
 
-            // Wyliczanie nowej pozycji w kierunku marszu
+            // 3. Wyliczanie nowej pozycji w kierunku marszu
             double rad = Math.toRadians(currentYaw);
             currentX -= Math.sin(rad) * speed;
             currentZ += Math.cos(rad) * speed;
 
-            // Wysyłanie pakietu pozycji i obrotu (onGround = true)
+            // 4. Wysyłanie pakietu pozycji i obrotu
             sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
 
             try {
-                Thread.sleep(50); // Dokładnie 20 pakietów na sekundę (20 TPS)
+                Thread.sleep(50); // 20 Tps
             } catch (InterruptedException e) {
                 break;
             }
         }
 
-        System.out.println("[BOT] [RUCH] Zakończono 8-sekundową sekwencję ruchu!");
+        // Puszczenie klawiszy po zakończeniu marszu
+        sendPlayerInputPacket(session, false, false, false, false, false, false);
+
+        System.out.println("[BOT] [RUCH] Zakończono sekwencję weryfikacji!");
         isVerifying = false;
+    }
+
+    private static void sendPlayerInputPacket(Session session, boolean forward, boolean backward, boolean left, boolean right, boolean jump, boolean sneak) {
+        try {
+            Class<?> inputClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerInputPacket");
+
+            for (Constructor<?> cons : inputClass.getConstructors()) {
+                Class<?>[] pTypes = cons.getParameterTypes();
+
+                // Konstruktor z flagami boolowskimi (wersje 1.20.5+)
+                if (pTypes.length >= 4) {
+                    Object[] args = new Object[pTypes.length];
+                    for (int i = 0; i < pTypes.length; i++) {
+                        if (pTypes[i] == boolean.class || pTypes[i] == Boolean.class) {
+                            if (i == 0) args[i] = forward;
+                            else if (i == 1) args[i] = backward;
+                            else if (i == 2) args[i] = left;
+                            else if (i == 3) args[i] = right;
+                            else if (i == 4) args[i] = jump;
+                            else if (i == 5) args[i] = sneak;
+                            else args[i] = false;
+                        } else {
+                            args[i] = null;
+                        }
+                    }
+                    session.send((Packet) cons.newInstance(args));
+                    return;
+                } 
+                // Konstruktor z wartościami float (xxa, zza)
+                else if (pTypes.length == 2 && pTypes[0] == float.class) {
+                    float xxa = left ? 0.98f : (right ? -0.98f : 0.0f);
+                    float zza = forward ? 0.98f : (backward ? -0.98f : 0.0f);
+                    session.send((Packet) cons.newInstance(xxa, zza));
+                    return;
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private static void sendClientInformation(Session session) {
+        try {
+            Class<?> clientInfoClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundClientInformationPacket");
+            for (Constructor<?> cons : clientInfoClass.getConstructors()) {
+                Class<?>[] pTypes = cons.getParameterTypes();
+                Object[] args = new Object[pTypes.length];
+                boolean valid = true;
+
+                for (int i = 0; i < pTypes.length; i++) {
+                    Class<?> p = pTypes[i];
+                    if (p == String.class) {
+                        args[i] = "pl_pl";
+                    } else if (p == int.class || p == Integer.class) {
+                        args[i] = 8; // render distance
+                    } else if (p == boolean.class || p == Boolean.class) {
+                        args[i] = true;
+                    } else if (p.isEnum()) {
+                        Object[] constants = p.getEnumConstants();
+                        if (constants != null && constants.length > 0) {
+                            args[i] = constants[0];
+                        } else {
+                            valid = false;
+                        }
+                    } else if (p == byte.class || p == Byte.class) {
+                        args[i] = (byte) 127;
+                    } else {
+                        args[i] = null;
+                    }
+                }
+
+                if (valid) {
+                    try {
+                        session.send((Packet) cons.newInstance(args));
+                        System.out.println("[BOT] Wysyłano informacje o kliencie (ClientInformation)");
+                        return;
+                    } catch (Exception ignored) {}
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround) {
