@@ -38,6 +38,7 @@ public class Main {
 
     private static volatile int activeContainerId = -1;
     private static volatile boolean waitingForGui = false;
+    private static volatile long lastCompassUse = 0;
 
     public static void main(String[] args) {
         System.out.println("=================================");
@@ -65,19 +66,29 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // 1. DYNAMICZNA OBSŁUGA PACZKI ZASOBÓW (AUTOMATYCZNE AKCEPTOWANIE)
+                            // 1. DYNAMICZNA OBSŁUGA PACZKI ZASOBÓW (Z PEŁNYM CYKLEM: ACCEPTED -> DOWNLOADED -> LOADED)
                             if (packetName.contains("ResourcePack")) {
-                                System.out.println("[BOT] [RESOURCE PACK] Wykryto żądanie paczki zasobów. Automatycznie akceptuję...");
+                                System.out.println("[BOT] [RESOURCE PACK] Wykryto żądanie paczki zasobów. Rozpoczynam sekwencję akceptacji...");
                                 handleResourcePack(session, packet);
                             }
 
-                            // 2. Podgląd czatu serwera podczas oczekiwania na menu
-                            if (waitingForGui) {
-                                if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
-                                    String chatText = extractChatText(packet);
+                            // 2. Podgląd czatu serwera oraz automatyczna ponowna próba kompasu
+                            if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
+                                String chatText = extractChatText(packet);
+                                if (waitingForGui) {
                                     System.out.println("[BOT] [CZAT SERWERA] -> " + chatText);
-                                } else {
-                                    System.out.println("[BOT] [ODBIEG-PAKIET] -> " + packetName);
+                                }
+
+                                // Jeśli serwer twierdzi, że trwa pobieranie, ponawiamy kompas po 3 sekundach
+                                if (chatText.contains("Trwa pobieranie") && System.currentTimeMillis() - lastCompassUse > 3000) {
+                                    lastCompassUse = System.currentTimeMillis();
+                                    new Thread(() -> {
+                                        try {
+                                            System.out.println("[BOT] Serwer zgłasza pobieranie - ponawiam użycie kompasu za 3 sekundy...");
+                                            Thread.sleep(3000);
+                                            useCompass(session);
+                                        } catch (Exception ignored) {}
+                                    }).start();
                                 }
                             }
 
@@ -181,13 +192,8 @@ public class Main {
                 session.send(new ServerboundSetCarriedItemPacket(4));
                 Thread.sleep(500);
 
-                System.out.println("[BOT] Używam kompasu w dłoni...");
                 waitingForGui = true;
-
-                session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
-                session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
-
-                System.out.println("[BOT] Kompas został użyty. Oczekuję na menu...");
+                useCompass(session);
 
             } catch (Exception e) {
                 System.err.println("[BOT] Błąd sekwencji: " + e.getMessage());
@@ -195,10 +201,18 @@ public class Main {
         }).start();
     }
 
+    private static void useCompass(Session session) {
+        if (!session.isConnected()) return;
+        System.out.println("[BOT] Używam kompasu w dłoni...");
+        lastCompassUse = System.currentTimeMillis();
+        session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
+        session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
+    }
+
     private static void handleResourcePack(Session session, Packet incomingPacket) {
         new Thread(() -> {
             try {
-                // 1. Odczytywanie UUID z pakietu przychodzącego
+                // Odczytywanie UUID
                 UUID packId = null;
                 for (Method m : incomingPacket.getClass().getMethods()) {
                     if (m.getParameterCount() == 0 && m.getReturnType() == UUID.class) {
@@ -209,42 +223,43 @@ public class Main {
                     }
                 }
 
-                // 2. Dynamiczne przeszukiwanie JAR-a w celu odnalezienia klasy wychodzącego pakietu ResourcePack
                 Class<?> packetClass = findServerboundResourcePackClass();
+                if (packetClass == null) return;
 
-                if (packetClass == null) {
-                    System.err.println("[BOT] [RESOURCE PACK] Błąd: Nie odnaleziono pakietu wychodzącego w JAR.");
-                    return;
-                }
-
-                // 3. Dynamiczne odnajdywanie Enum statusu
                 Class<?> statusEnum = findStatusEnum(packetClass);
-
-                if (statusEnum == null) {
-                    System.err.println("[BOT] [RESOURCE PACK] Błąd: Nie odnaleziono enuma statusu paczki.");
-                    return;
-                }
+                if (statusEnum == null) return;
 
                 Object accepted = null;
+                Object downloaded = null;
                 Object loaded = null;
 
                 for (Object constant : statusEnum.getEnumConstants()) {
                     String name = constant.toString().toUpperCase();
                     if (name.contains("ACCEPTED")) accepted = constant;
-                    if (name.contains("SUCCESSFULLY_LOADED") || name.contains("LOADED")) loaded = constant;
+                    if (name.contains("DOWNLOADED")) downloaded = constant;
+                    if (name.contains("SUCCESSFULLY_LOADED") || name.equals("LOADED")) loaded = constant;
                 }
 
-                // 4. Wysyłanie pakietów odpowiedzi
+                // 1. Wysyłanie ACCEPTED
                 if (accepted != null) {
                     sendResourcePackResponse(session, packetClass, packId, accepted);
-                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: ACCEPTED (Zaakceptowano)");
+                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: ACCEPTED");
                 }
 
-                Thread.sleep(300);
+                Thread.sleep(500);
 
+                // 2. Wysyłanie DOWNLOADED (wymagane od 1.20.3+)
+                if (downloaded != null) {
+                    sendResourcePackResponse(session, packetClass, packId, downloaded);
+                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: DOWNLOADED");
+                }
+
+                Thread.sleep(500);
+
+                // 3. Wysyłanie SUCCESSFULLY_LOADED
                 if (loaded != null) {
                     sendResourcePackResponse(session, packetClass, packId, loaded);
-                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: SUCCESSFULLY_LOADED (Załadowano)");
+                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: SUCCESSFULLY_LOADED");
                 }
 
             } catch (Exception e) {
