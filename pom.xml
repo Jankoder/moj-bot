@@ -14,22 +14,42 @@
     </properties>
 
     <repositories>
-        <!-- JitPack pobierający bibliotekę z GitHuba GeyserMC -->
-        <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
-        </repository>
+        <!-- Główne repozytorium Geyser / MCProtocolLib -->
         <repository>
             <id>opencollab-main</id>
             <url>https://repo.opencollab.dev/main/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+
+        <!-- Oficjalne repozytorium CodeMC (Lustro dla bibliotek MC) -->
+        <repository>
+            <id>codemc-repo</id>
+            <url>https://repo.codemc.io/repository/maven-public/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+        </repository>
+
+        <!-- Zapasowe repozytorium JitPack -->
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
         </repository>
     </repositories>
 
     <dependencies>
         <dependency>
-            <groupId>com.github.GeyserMC.MCProtocolLib</groupId>
+            <groupId>org.geysermc.mcprotocollib</groupId>
             <artifactId>protocol</artifactId>
-            <version>1.19.4-1</version>
+            <version>1.19.4-1-SNAPSHOT</version>
         </dependency>
     </dependencies>
 
@@ -57,7 +77,6 @@
                         <configuration>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <!-- Upewnij się, że poniżej podana jest właściwa klasa z metodą main -->
                                     <mainClass>com.bot.Main</mainClass>
                                 </transformer>
                             </transformers>
