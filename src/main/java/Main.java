@@ -1,3 +1,5 @@
+ package com.bot;
+
 import org.geysermc.mcprotocollib.network.Session;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.PacketReceivedEvent;
@@ -22,8 +24,8 @@ public class Main {
 
     public static void main(String[] args) {
         System.out.println("=================================");
-        System.out.println("   AUTORSKI BOT AFK 1.21.4      ");
-        System.out.println("   (MCProtocolLib + Maven)      ");
+        System.out.println("   AUTORSKI BOT AFK 1.21.4       ");
+        System.out.println("   (MCProtocolLib + Maven)       ");
         System.out.println("=================================");
 
         while (true) {
@@ -82,25 +84,25 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login " + PASSWORD);
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // Krok 2: Weryfikacja ruchowa
+                // Krok 2: Weryfikacja ruchowa (onGround, horizontalCollision, x, y, z, yaw, pitch)
                 Thread.sleep(2500);
                 System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
                 
                 double x = 0, y = 64, z = 0;
 
-                session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, -30.0f, 0.0f, true));
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, -30.0f, 0.0f));
                 Thread.sleep(500);
-                session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, 30.0f, 0.0f, true));
+                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
                 Thread.sleep(500);
 
                 System.out.println("[BOT] Idę do przodu przez 6 sekund...");
                 for (int i = 0; i < 12; i++) {
                     z += 0.5;
-                    session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, 0.0f, 0.0f, true));
+                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
                     Thread.sleep(500);
                 }
 
-                // Krok 3: Użycie kompasu
+                // Krok 3: Użycie kompasu (Hand, sequence)
                 System.out.println("[BOT] Używam kompasu w dłoni...");
                 session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0));
                 
