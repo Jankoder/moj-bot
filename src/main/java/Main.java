@@ -1,7 +1,6 @@
 package com.bot;
 
 import org.geysermc.mcprotocollib.network.Session;
-import org.geysermc.mcprotocollib.network.tcp.TcpClientSession;
 import org.geysermc.mcprotocollib.network.packet.Packet;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
@@ -11,13 +10,9 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.Serverbound
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
-import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType;
-import org.geysermc.mcprotocollib.protocol.data.game.inventory.DefaultContainerAction;
-import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
-import org.geysermc.mcprotocollib.protocol.data.game.item.HashedStack;
-import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.util.Hashtable;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
@@ -46,7 +41,7 @@ public class Main {
                 System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
-                TcpClientSession session = new TcpClientSession(targetHost, targetPort, protocol);
+                Session session = createSession(targetHost, targetPort, protocol);
 
                 activeContainerId = -1;
 
@@ -58,7 +53,7 @@ public class Main {
 
                             // 1. Wykrywanie otwarcia okna (menu / kompas)
                             if (packetName.contains("OpenScreen") || packetName.contains("ContainerOpen")) {
-                                java.lang.reflect.Method getContainerId = packet.getClass().getMethod("getContainerId");
+                                Method getContainerId = packet.getClass().getMethod("getContainerId");
                                 activeContainerId = (int) getContainerId.invoke(packet);
                                 System.out.println("[BOT] [GUI] Otwarto menu ekwipunku. ID kontenera: " + activeContainerId);
                             }
@@ -66,10 +61,10 @@ public class Main {
                             // 2. Wykrywanie zawartości okna i szukanie "AnarchiaSMP"
                             if (packetName.contains("ContainerSetContent") || packetName.contains("WindowItems")) {
                                 if (activeContainerId != -1) {
-                                    java.lang.reflect.Method getContainerId = packet.getClass().getMethod("getContainerId");
+                                    Method getContainerId = packet.getClass().getMethod("getContainerId");
                                     int id = (int) getContainerId.invoke(packet);
                                     if (id == activeContainerId) {
-                                        java.lang.reflect.Method getItems = packet.getClass().getMethod("getItems");
+                                        Method getItems = packet.getClass().getMethod("getItems");
                                         Iterable<?> items = (Iterable<?>) getItems.invoke(packet);
                                         
                                         int slotIndex = 0;
@@ -99,7 +94,7 @@ public class Main {
                     }
                 });
 
-                session.connect();
+                connectSession(session);
                 System.out.println("[BOT] [OK] Wysłano żądanie połączenia...");
 
                 startBotSequence(session);
@@ -119,7 +114,7 @@ public class Main {
         }
     }
 
-    private static void startBotSequence(TcpClientSession session) {
+    private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
                 System.out.println("[BOT] Czekam 4 sekundy na załadowanie świata...");
@@ -161,26 +156,170 @@ public class Main {
         }).start();
     }
 
-    private static void clickSlot(TcpClientSession session, int containerId, int slotIndex, Object clickedItem) {
+    private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
         try {
-            Int2ObjectMap<HashedStack> changedSlots = new Int2ObjectOpenHashMap<>();
-            HashedStack hashedItem = (clickedItem instanceof ItemStack) 
-                    ? HashedStack.of((ItemStack) clickedItem) 
-                    : HashedStack.EMPTY;
+            // 1. Znajdź wartość ContainerActionType
+            Class<?> actionTypeClass = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType");
+            Object actionType = null;
+            Object[] actionConstants = actionTypeClass.getEnumConstants();
+            if (actionConstants != null) {
+                for (Object c : actionConstants) {
+                    String name = c.toString().toUpperCase();
+                    if (name.contains("CLICK") || name.contains("PICKUP")) {
+                        actionType = c;
+                        break;
+                    }
+                }
+                if (actionType == null && actionConstants.length > 0) {
+                    actionType = actionConstants[0];
+                }
+            }
 
-            ServerboundContainerClickPacket packet = new ServerboundContainerClickPacket(
-                containerId, 
-                0, 
-                slotIndex, 
-                ContainerActionType.PICKUP, 
-                DefaultContainerAction.LEFT_CLICK, 
-                hashedItem, 
-                changedSlots
-            );
-            session.send(packet);
-            System.out.println("[BOT] Wysłano pakiet kliknięcia w slot " + slotIndex);
+            // 2. Znajdź wartość ContainerAction
+            Object containerAction = null;
+            String[] actionClassNames = new String[] {
+                "org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction$ClickItemAction",
+                "org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickItemAction",
+                "org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction",
+                "org.geysermc.mcprotocollib.protocol.data.game.inventory.DefaultContainerAction"
+            };
+            for (String acName : actionClassNames) {
+                try {
+                    Class<?> acClass = Class.forName(acName);
+                    Object[] constants = acClass.getEnumConstants();
+                    if (constants != null && constants.length > 0) {
+                        for (Object c : constants) {
+                            if (c.toString().toUpperCase().contains("LEFT")) {
+                                containerAction = c;
+                                break;
+                            }
+                        }
+                        if (containerAction == null) {
+                            containerAction = constants[0];
+                        }
+                        break;
+                    }
+                } catch (ClassNotFoundException ignored) {}
+            }
+
+            // 3. Przygotuj HashedStack
+            Object hashedStack = null;
+            try {
+                Class<?> hashedStackClass = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.item.HashedStack");
+                for (Constructor<?> cons : hashedStackClass.getConstructors()) {
+                    if (cons.getParameterCount() == 0) {
+                        hashedStack = cons.newInstance();
+                        break;
+                    } else if (cons.getParameterCount() == 1 && clickedItem != null && cons.getParameterTypes()[0].isAssignableFrom(clickedItem.getClass())) {
+                        hashedStack = cons.newInstance(clickedItem);
+                        break;
+                    }
+                }
+                if (hashedStack == null) {
+                    for (Constructor<?> cons : hashedStackClass.getConstructors()) {
+                        if (cons.getParameterCount() == 3) {
+                            hashedStack = cons.newInstance(0, 0, null);
+                            break;
+                        } else if (cons.getParameterCount() == 2) {
+                            hashedStack = cons.newInstance(0, 0);
+                            break;
+                        }
+                    }
+                }
+            } catch (ClassNotFoundException ignored) {}
+
+            // 4. Utwórz pakiety ServerboundContainerClickPacket
+            Object packet = null;
+            Constructor<?>[] constructors = ServerboundContainerClickPacket.class.getConstructors();
+            for (Constructor<?> cons : constructors) {
+                Class<?>[] pTypes = cons.getParameterTypes();
+                Object[] args = new Object[pTypes.length];
+                boolean valid = true;
+
+                for (int i = 0; i < pTypes.length; i++) {
+                    Class<?> p = pTypes[i];
+                    if (p == int.class || p == Integer.class) {
+                        if (i == 0) args[i] = containerId;
+                        else if (i == 2) args[i] = slotIndex;
+                        else args[i] = 0;
+                    } else if (actionType != null && p.isAssignableFrom(actionType.getClass())) {
+                        args[i] = actionType;
+                    } else if (containerAction != null && p.isAssignableFrom(containerAction.getClass())) {
+                        args[i] = containerAction;
+                    } else if (p.getName().contains("ContainerAction") && containerAction != null) {
+                        args[i] = containerAction;
+                    } else if (p.getName().contains("HashedStack")) {
+                        args[i] = hashedStack;
+                    } else if (p == java.util.Map.class || p.getName().contains("Map")) {
+                        try {
+                            args[i] = Class.forName("it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap").getDeclaredConstructor().newInstance();
+                        } catch (Exception e) {
+                            args[i] = new java.util.HashMap<>();
+                        }
+                    } else {
+                        valid = false;
+                    }
+                }
+
+                if (valid) {
+                    try {
+                        packet = cons.newInstance(args);
+                        break;
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            if (packet != null) {
+                session.send((Packet) packet);
+                System.out.println("[BOT] Wysłano pakiet kliknięcia w slot " + slotIndex);
+            } else {
+                System.err.println("[BOT] Błąd: Nie odnaleziono pasującego konstruktora dla kliknięcia.");
+            }
+
         } catch (Exception e) {
             System.err.println("[BOT] Błąd kliknięcia slotu: " + e.getMessage());
+        }
+    }
+
+    private static Session createSession(String host, int port, MinecraftProtocol protocol) throws Exception {
+        String[] candidateClasses = new String[] {
+            "org.geysermc.mcprotocollib.network.tcp.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.client.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.client.ClientSession",
+            "org.geysermc.mcprotocollib.network.session.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.session.ClientSession",
+            "org.geysermc.mcprotocollib.network.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.ClientSession",
+            "org.geysermc.mcprotocollib.network.SessionClient"
+        };
+
+        for (String className : candidateClasses) {
+            try {
+                Class<?> clazz = Class.forName(className);
+                for (Constructor<?> cons : clazz.getConstructors()) {
+                    if (cons.getParameterCount() == 3) {
+                        try {
+                            return (Session) cons.newInstance(host, port, protocol);
+                        } catch (Exception ignored) {}
+                    }
+                }
+            } catch (ClassNotFoundException ignored) {}
+        }
+        throw new IllegalStateException("Nie odnaleziono odpowiedniej klasy sesji w bibliotece MCProtocolLib.");
+    }
+
+    private static void connectSession(Session session) throws Exception {
+        try {
+            Method m = session.getClass().getMethod("connect");
+            m.invoke(session);
+        } catch (NoSuchMethodException e) {
+            try {
+                Method m = session.getClass().getMethod("connect", boolean.class);
+                m.invoke(session, true);
+            } catch (NoSuchMethodException e2) {
+                Method m = session.getClass().getMethod("connect", boolean.class, boolean.class);
+                m.invoke(session, true, false);
+            }
         }
     }
 
