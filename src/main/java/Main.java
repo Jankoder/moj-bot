@@ -14,7 +14,12 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.S
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.util.Hashtable;
+import java.net.InetSocketAddress;
+import java.net.SocketAddress;
+import java.net.URL;
+import java.util.*;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import javax.naming.directory.Attributes;
 import javax.naming.directory.DirContext;
 import javax.naming.directory.InitialDirContext;
@@ -159,7 +164,6 @@ public class Main {
 
     private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
         try {
-            // 1. Znajdź wartość ContainerActionType
             Class<?> actionTypeClass = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerActionType");
             Object actionType = null;
             Object[] actionConstants = actionTypeClass.getEnumConstants();
@@ -176,7 +180,6 @@ public class Main {
                 }
             }
 
-            // 2. Znajdź wartość ContainerAction
             Object containerAction = null;
             String[] actionClassNames = new String[] {
                 "org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction$ClickItemAction",
@@ -203,7 +206,6 @@ public class Main {
                 } catch (ClassNotFoundException ignored) {}
             }
 
-            // 3. Przygotuj HashedStack
             Object hashedStack = null;
             try {
                 Class<?> hashedStackClass = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.item.HashedStack");
@@ -229,7 +231,6 @@ public class Main {
                 }
             } catch (ClassNotFoundException ignored) {}
 
-            // 4. Utwórz pakiet ServerboundContainerClickPacket
             Object packet = null;
             Constructor<?>[] constructors = ServerboundContainerClickPacket.class.getConstructors();
             for (Constructor<?> cons : constructors) {
@@ -251,11 +252,11 @@ public class Main {
                         args[i] = containerAction;
                     } else if (p.getName().contains("HashedStack")) {
                         args[i] = hashedStack;
-                    } else if (p == java.util.Map.class || p.getName().contains("Map")) {
+                    } else if (p == Map.class || p.getName().contains("Map")) {
                         try {
                             args[i] = Class.forName("it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap").getDeclaredConstructor().newInstance();
                         } catch (Exception e) {
-                            args[i] = new java.util.HashMap<>();
+                            args[i] = new HashMap<>();
                         }
                     } else {
                         valid = false;
@@ -283,64 +284,110 @@ public class Main {
     }
 
     private static Session createSession(String host, int port, MinecraftProtocol protocol) throws Exception {
-        // Lista prawdopodobnych nazw klas sesji
         String[] candidateClasses = new String[] {
-            "org.geysermc.mcprotocollib.network.session.TcpSession",
-            "org.geysermc.mcprotocollib.network.tcp.TcpSession",
             "org.geysermc.mcprotocollib.network.session.ClientSession",
+            "org.geysermc.mcprotocollib.network.session.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.session.TcpSession",
             "org.geysermc.mcprotocollib.network.client.ClientSession",
             "org.geysermc.mcprotocollib.network.client.TcpClientSession",
             "org.geysermc.mcprotocollib.network.tcp.TcpClientSession",
-            "org.geysermc.mcprotocollib.network.session.TcpClientSession",
+            "org.geysermc.mcprotocollib.network.tcp.TcpSession",
             "org.geysermc.mcprotocollib.network.TcpClientSession",
-            "org.geysermc.mcprotocollib.network.TcpSession",
             "org.geysermc.mcprotocollib.network.ClientSession",
-            "org.geysermc.mcprotocollib.protocol.ClientSession",
-            "org.geysermc.mcprotocollib.protocol.TcpClientSession"
+            "org.geysermc.mcprotocollib.network.SessionClient"
         };
 
         for (String className : candidateClasses) {
-            try {
-                Class<?> clazz = Class.forName(className);
-                for (Constructor<?> cons : clazz.getConstructors()) {
-                    if (cons.getParameterCount() == 3) {
-                        try {
-                            return (Session) cons.newInstance(host, port, protocol);
-                        } catch (Exception ignored) {}
-                    }
-                }
-            } catch (ClassNotFoundException ignored) {}
+            Session session = tryInstantiateSession(className, host, port, protocol);
+            if (session != null) {
+                System.out.println("[BOT] Utworzono sesję z klasy: " + className);
+                return session;
+            }
         }
 
-        // Skanowanie biblioteki JAR, jeśli nazwy statyczne zawiodą
-        java.net.URL location = Session.class.getProtectionDomain().getCodeSource().getLocation();
-        if (location != null) {
-            try (java.util.jar.JarFile jarFile = new java.util.jar.JarFile(new java.io.File(location.toURI()))) {
-                java.util.Enumeration<java.util.jar.JarEntry> entries = jarFile.entries();
-                while (entries.hasMoreElements()) {
-                    java.util.jar.JarEntry entry = entries.nextElement();
-                    String name = entry.getName();
-                    if (name.endsWith(".class") && name.startsWith("org/geysermc/mcprotocollib/")) {
-                        String className = name.replace('/', '.').substring(0, name.length() - 6);
-                        try {
-                            Class<?> clazz = Class.forName(className);
-                            if (Session.class.isAssignableFrom(clazz) && !clazz.isInterface() && !Modifier.isAbstract(clazz.getModifiers())) {
-                                for (Constructor<?> cons : clazz.getConstructors()) {
-                                    if (cons.getParameterCount() == 3) {
-                                        System.out.println("[BOT] Wykryto klasę sesji: " + className);
-                                        return (Session) cons.newInstance(host, port, protocol);
-                                    }
-                                }
-                            }
-                        } catch (Throwable ignored) {}
-                    }
+        System.out.println("[BOT] Szukam odpowiedniej klasy w pliku JAR...");
+        List<Class<?>> classes = scanMcProtocolLibClasses();
+        System.out.println("[BOT] Przeszukano " + classes.size() + " klas sesji.");
+
+        for (Class<?> clazz : classes) {
+            if (!clazz.isInterface() && !Modifier.isAbstract(clazz.getModifiers())) {
+                Session session = tryInstantiateSessionClass(clazz, host, port, protocol);
+                if (session != null) {
+                    System.out.println("[BOT] Utworzono sesję z wykrytej klasy: " + clazz.getName());
+                    return session;
                 }
-            } catch (Exception e) {
-                System.err.println("[BOT] Błąd podczas skanowania JAR: " + e.getMessage());
             }
         }
 
         throw new IllegalStateException("Nie odnaleziono odpowiedniej klasy sesji w bibliotece MCProtocolLib.");
+    }
+
+    private static Session tryInstantiateSession(String className, String host, int port, MinecraftProtocol protocol) {
+        try {
+            Class<?> clazz = Class.forName(className);
+            return tryInstantiateSessionClass(clazz, host, port, protocol);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static Session tryInstantiateSessionClass(Class<?> clazz, String host, int port, MinecraftProtocol protocol) {
+        try {
+            for (Constructor<?> cons : clazz.getConstructors()) {
+                Class<?>[] types = cons.getParameterTypes();
+                if (types.length == 3) {
+                    if (types[0] == String.class && (types[1] == int.class || types[1] == Integer.class)) {
+                        try {
+                            Object obj = cons.newInstance(host, port, protocol);
+                            if (obj instanceof Session) return (Session) obj;
+                        } catch (Throwable ignored) {}
+                    }
+                } else if (types.length == 2) {
+                    if (SocketAddress.class.isAssignableFrom(types[0]) || InetSocketAddress.class.isAssignableFrom(types[0])) {
+                        try {
+                            Object obj = cons.newInstance(new InetSocketAddress(host, port), protocol);
+                            if (obj instanceof Session) return (Session) obj;
+                        } catch (Throwable ignored) {}
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static List<Class<?>> scanMcProtocolLibClasses() {
+        List<Class<?>> classes = new ArrayList<>();
+        try {
+            Set<URL> urls = new HashSet<>();
+            try { urls.add(Session.class.getProtectionDomain().getCodeSource().getLocation()); } catch (Throwable ignored) {}
+            try { urls.add(Main.class.getProtectionDomain().getCodeSource().getLocation()); } catch (Throwable ignored) {}
+
+            for (URL location : urls) {
+                if (location == null) continue;
+                java.io.File file = new java.io.File(location.toURI());
+                if (file.exists() && file.isFile() && file.getName().endsWith(".jar")) {
+                    try (JarFile jarFile = new JarFile(file)) {
+                        Enumeration<JarEntry> entries = jarFile.entries();
+                        while (entries.hasMoreElements()) {
+                            JarEntry entry = entries.nextElement();
+                            String name = entry.getName();
+                            if (name.endsWith(".class") && name.contains("mcprotocollib")) {
+                                String className = name.replace('/', '.').substring(0, name.length() - 6);
+                                try {
+                                    Class<?> c = Class.forName(className);
+                                    if (Session.class.isAssignableFrom(c) || className.toLowerCase().contains("session")) {
+                                        classes.add(c);
+                                    }
+                                } catch (Throwable ignored) {}
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Throwable e) {
+            System.err.println("[BOT] Błąd skanowania klas: " + e.getMessage());
+        }
+        return classes;
     }
 
     private static void connectSession(Session session) throws Exception {
