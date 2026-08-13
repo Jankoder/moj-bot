@@ -65,9 +65,9 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // 1. AUTOMATYCZNE ZZEWOLENIE I AKCEPTACJA PACZKI ZASOBÓW (W DOWOLNYM MOMENCIE)
+                            // 1. AUTOMATYCZNE AKCEPTOWANIE PACZKI ZASOBÓW (ZGODNIE Z USTAWIENIEM MC "ENABLED")
                             if (packetName.contains("ResourcePack")) {
-                                System.out.println("[BOT] [RESOURCE PACK] Otrzymano prośbę o paczkę zasobów. Automatycznie akceptuję...");
+                                System.out.println("[BOT] [RESOURCE PACK] Wykryto żądanie paczki zasobów. Automatycznie przyjmowanie...");
                                 handleResourcePack(session, packet);
                             }
 
@@ -198,13 +198,57 @@ public class Main {
     private static void handleResourcePack(Session session, Packet incomingPacket) {
         new Thread(() -> {
             try {
+                // 1. Odczytywanie UUID paczki
                 UUID packId = null;
-                try {
-                    Method getId = incomingPacket.getClass().getMethod("getId");
-                    packId = (UUID) getId.invoke(incomingPacket);
-                } catch (Exception ignored) {}
+                for (Method m : incomingPacket.getClass().getMethods()) {
+                    if (m.getName().toLowerCase().contains("id") && m.getReturnType() == UUID.class) {
+                        try {
+                            packId = (UUID) m.invoke(incomingPacket);
+                            break;
+                        } catch (Exception ignored) {}
+                    }
+                }
 
-                Class<?> statusEnum = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus");
+                // 2. Szukanie klasy pakietu wysyłanego do serwera
+                Class<?> packetClass = null;
+                String[] candidatePacketNames = new String[] {
+                    "org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundResourcePackPacket",
+                    "org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundResourcePackResponsePacket"
+                };
+
+                for (String pName : candidatePacketNames) {
+                    try {
+                        packetClass = Class.forName(pName);
+                        break;
+                    } catch (ClassNotFoundException ignored) {}
+                }
+
+                if (packetClass == null) {
+                    System.err.println("[BOT] [RESOURCE PACK] Błąd: Nie odnaleziono pakietu ResourcePack w bibliotece.");
+                    return;
+                }
+
+                // 3. Szukanie enuma ze statusem paczki
+                Class<?> statusEnum = null;
+                String[] candidateStatusNames = new String[] {
+                    "org.geysermc.mcprotocollib.protocol.data.game.ResourcePackStatus",
+                    "org.geysermc.mcprotocollib.protocol.data.game.entity.player.ResourcePackStatus",
+                    packetClass.getName() + "$Action",
+                    packetClass.getName() + "$Status"
+                };
+
+                for (String sName : candidateStatusNames) {
+                    try {
+                        statusEnum = Class.forName(sName);
+                        if (statusEnum.isEnum()) break;
+                    } catch (ClassNotFoundException ignored) {}
+                }
+
+                if (statusEnum == null || !statusEnum.isEnum()) {
+                    System.err.println("[BOT] [RESOURCE PACK] Błąd: Nie odnaleziono enuma statusu paczki zasobów.");
+                    return;
+                }
+
                 Object accepted = null;
                 Object loaded = null;
 
@@ -214,20 +258,21 @@ public class Main {
                     if (name.contains("SUCCESSFULLY_LOADED") || name.contains("LOADED")) loaded = constant;
                 }
 
-                Class<?> serverboundPacketClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundResourcePackPacket");
+                // 4. Wysyłanie odpowiedzi do serwera
+                if (accepted != null) {
+                    sendResourcePackResponse(session, packetClass, packId, accepted);
+                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: ACCEPTED (Zaakceptowano paczkę)");
+                }
 
-                // 1. Zgłoszenie akceptacji pobierania
-                sendResourcePackResponse(session, serverboundPacketClass, packId, accepted);
-                System.out.println("[BOT] [RESOURCE PACK] Wysłąno: AKCEPTACJA DOWMACCZA PACZKI.");
+                Thread.sleep(300);
 
-                Thread.sleep(400);
-
-                // 2. Zgłoszenie pomyślnego załadowania
-                sendResourcePackResponse(session, serverboundPacketClass, packId, loaded);
-                System.out.println("[BOT] [RESOURCE PACK] Wysłąno: PACZKA ZASOBÓW ZAŁADOWANA!");
+                if (loaded != null) {
+                    sendResourcePackResponse(session, packetClass, packId, loaded);
+                    System.out.println("[BOT] [RESOURCE PACK] Wysłano: SUCCESSFULLY_LOADED (Paczka załadowana)");
+                }
 
             } catch (Exception e) {
-                System.err.println("[BOT] Błąd automatycznej obsługi paczki zasobów: " + e.getMessage());
+                System.err.println("[BOT] Błąd obsługi Resource Packa: " + (e.getMessage() != null ? e.getMessage() : e.toString()));
             }
         }).start();
     }
@@ -237,10 +282,15 @@ public class Main {
         for (Constructor<?> cons : packetClass.getConstructors()) {
             try {
                 Class<?>[] types = cons.getParameterTypes();
-                if (types.length == 2 && types[0] == UUID.class) {
-                    session.send((Packet) cons.newInstance(packId, status));
-                    return;
-                } else if (types.length == 1) {
+                if (types.length == 2) {
+                    if (types[0] == UUID.class && types[1].isAssignableFrom(status.getClass())) {
+                        session.send((Packet) cons.newInstance(packId, status));
+                        return;
+                    } else if (types[1] == UUID.class && types[0].isAssignableFrom(status.getClass())) {
+                        session.send((Packet) cons.newInstance(status, packId));
+                        return;
+                    }
+                } else if (types.length == 1 && types[0].isAssignableFrom(status.getClass())) {
                     session.send((Packet) cons.newInstance(status));
                     return;
                 }
