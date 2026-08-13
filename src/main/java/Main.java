@@ -22,6 +22,7 @@ import java.net.URL;
 import java.util.*;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -33,7 +34,7 @@ public class Main {
 
     private static final String HOST = "anarchia.gg";
     private static final String USERNAME = "jankoder2";
-    private static final String PASSWORD = "Krokodyl12!";
+    private static final String PASSWORD = "TWOJE_HASLO"; // Podmień na własne hasło
 
     private static volatile int activeContainerId = -1;
     private static volatile boolean resourcePackFinished = false;
@@ -118,7 +119,7 @@ public class Main {
                                                 String itemStr = item.toString().toLowerCase();
                                                 if (itemStr.contains("anarchia") || itemStr.contains("smp") || itemStr.contains("graj")) {
                                                     System.out.println("[BOT] [GUI] Klikam AnarchiaSMP w slocie " + slotIndex);
-                                                    Thread.sleep(500);
+                                                    Thread.sleep(ThreadLocalRandom.current().nextLong(400, 800));
                                                     clickSlot(session, activeContainerId, slotIndex, item);
                                                     activeContainerId = -1;
                                                     break;
@@ -139,7 +140,6 @@ public class Main {
                                     System.out.println("[BOT] [CZAT] " + cleanedText);
                                 }
 
-                                // NATYCHMIASTOWY START RUCHU PO OTRZYMANIU SYGNAŁU Z SERWERA
                                 String rawPacket = packet.toString().toLowerCase();
                                 if (rawPacket.contains("weryfikacja") || rawPacket.contains("poruszać") || rawPacket.contains("pozycji") || rawPacket.contains("ruszaj")) {
                                     if (!isVerifying) {
@@ -206,19 +206,15 @@ public class Main {
                     }
                 }
             }
-
             if (updated && !positionReceived) {
                 positionReceived = true;
                 System.out.printf("[BOT] Odczytano pozycję: X=%.2f, Y=%.2f, Z=%.2f\n", currentX, currentY, currentZ);
             }
 
-            // Confirm Teleportation Packet and ECHO position (CRITICAL FOR ANTICHEAT)
             for (Method m : packet.getClass().getMethods()) {
                 if (m.getName().toLowerCase().contains("teleportid") && m.getParameterCount() == 0) {
                     int teleportId = (int) m.invoke(packet);
                     sendTeleportConfirm(session, teleportId);
-                    
-                    // Od razu po potwierdzeniu musimy wysłać serwerowi zwrotny pakiet Move w to samo miejsce!
                     sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, false);
                     break;
                 }
@@ -245,38 +241,30 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                // KROK 1: Logowanie i inicjalizacja informacji o kliencie
-                Thread.sleep(1500);
+                Thread.sleep(1800);
                 if (!session.isConnected()) return;
-
                 sendBrandPayload(session);
-                sendClientInformation(session); // Wysyłamy pakiet informacji o kliencie
-
+                sendClientInformation(session);
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // KROK 2: Czekamy na paczkę zasobów lub natychmiastowy sygnał weryfikacji
                 long startWait = System.currentTimeMillis();
-                while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 10000)) {
+                while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 12000)) {
                     if (!session.isConnected()) return;
                     if (isVerifying) break;
                     Thread.sleep(200);
                 }
-
                 if (!session.isConnected()) return;
 
-                // Czekamy na pierwszą pozycję ze świata
                 startWait = System.currentTimeMillis();
                 while (!positionReceived && (System.currentTimeMillis() - startWait < 6000)) {
                     if (!session.isConnected()) return;
                     if (isVerifying) break;
                     Thread.sleep(100);
                 }
-
-                Thread.sleep(1000);
+                Thread.sleep(1200);
                 if (!session.isConnected()) return;
 
-                // KROK 3: ZALICZANIE WERYFIKACJI RUCHU
                 if (!isVerifying) {
                     isVerifying = true;
                     performMovementVerification(session);
@@ -285,13 +273,11 @@ public class Main {
                         Thread.sleep(100);
                     }
                 }
-
                 if (!session.isConnected()) return;
 
-                // KROK 4: Wybór slotu i użycie kompasu
                 System.out.println("[BOT] Wybieram slot 4 (kompas)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
-                Thread.sleep(800);
+                Thread.sleep(1100);
                 if (!session.isConnected()) return;
 
                 System.out.println("[BOT] Klikam kompasem...");
@@ -299,7 +285,6 @@ public class Main {
                 int seq = sequenceCounter.incrementAndGet();
                 session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
                 sendUseItemPacket(session, seq);
-
             } catch (Exception e) {
                 System.err.println("[BOT] Błąd w sekwencji bota: " + e.getMessage());
             }
@@ -307,76 +292,43 @@ public class Main {
     }
 
     private static void performMovementVerification(Session session) {
-        System.out.println("[BOT] [RUCH] Rozpoczynam weryfikację ruchu (8 sekund, emulacja chodu i obrotu)...");
+        System.out.println("[BOT] [RUCH] Rozpoczynam naturalną, chaotyczną weryfikację ruchu...");
+        float targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-180f, 180f);
+        float targetPitch = ThreadLocalRandom.current().nextFloat(-10f, 15f);
 
-        float baseYaw = currentYaw;
-        double speed = 0.11; // Standardowa prędkość chodu
-
-        // 160 kroków po 50 ms = 8.0 sekund ruchu
-        for (int i = 0; i < 160; i++) {
+        for (int i = 0; i < 200; i++) {
             if (!session.isConnected()) {
                 isVerifying = false;
                 return;
             }
 
-            // 1. Łagodne rozglądanie się w lewo i prawo (bez trzęsienia głową)
-            float yawOffset = (float) (Math.sin(i * 0.1) * 25.0);
-            currentYaw = baseYaw + yawOffset;
+            if (i % 30 == 0) {
+                targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-90f, 90f);
+                targetPitch = ThreadLocalRandom.current().nextFloat(-15f, 15f);
+            }
 
-            // 2. Wyliczanie nowej pozycji w kierunku marszu
+            currentYaw += (targetYaw - currentYaw) * 0.15f;
+            currentPitch += (targetPitch - currentPitch) * 0.15f;
+
+            currentYaw += ThreadLocalRandom.current().nextFloat(-0.4f, 0.4f);
+            currentPitch += ThreadLocalRandom.current().nextFloat(-0.2f, 0.2f);
+
+            double currentSpeed = ThreadLocalRandom.current().nextDouble(0.09, 0.13);
             double rad = Math.toRadians(currentYaw);
-            currentX -= Math.sin(rad) * speed;
-            currentZ += Math.cos(rad) * speed;
+            currentX -= Math.sin(rad) * currentSpeed;
+            currentZ += Math.cos(rad) * currentSpeed;
 
-            // 3. Wysyłanie TYLKO pakietu Move (zwykły klient nie wysyła InputPacket na piechotę!)
             sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
 
             try {
-                Thread.sleep(50); // 20 Tps
+                int randomSleep = ThreadLocalRandom.current().nextInt(46, 55);
+                Thread.sleep(randomSleep);
             } catch (InterruptedException e) {
                 break;
             }
         }
-
         System.out.println("[BOT] [RUCH] Zakończono sekwencję weryfikacji!");
         isVerifying = false;
-    }
-
-    private static void sendPlayerInputPacket(Session session, boolean forward, boolean backward, boolean left, boolean right, boolean jump, boolean sneak) {
-        try {
-            Class<?> inputClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundPlayerInputPacket");
-
-            for (Constructor<?> cons : inputClass.getConstructors()) {
-                Class<?>[] pTypes = cons.getParameterTypes();
-
-                // Konstruktor z flagami boolowskimi (wersje 1.20.5+)
-                if (pTypes.length >= 4) {
-                    Object[] args = new Object[pTypes.length];
-                    for (int i = 0; i < pTypes.length; i++) {
-                        if (pTypes[i] == boolean.class || pTypes[i] == Boolean.class) {
-                            if (i == 0) args[i] = forward;
-                            else if (i == 1) args[i] = backward;
-                            else if (i == 2) args[i] = left;
-                            else if (i == 3) args[i] = right;
-                            else if (i == 4) args[i] = jump;
-                            else if (i == 5) args[i] = sneak;
-                            else args[i] = false;
-                        } else {
-                            args[i] = null;
-                        }
-                    }
-                    session.send((Packet) cons.newInstance(args));
-                    return;
-                } 
-                // Konstruktor z wartościami float (xxa, zza)
-                else if (pTypes.length == 2 && pTypes[0] == float.class) {
-                    float xxa = left ? 0.98f : (right ? -0.98f : 0.0f);
-                    float zza = forward ? 0.98f : (backward ? -0.98f : 0.0f);
-                    session.send((Packet) cons.newInstance(xxa, zza));
-                    return;
-                }
-            }
-        } catch (Exception ignored) {}
     }
 
     private static void sendClientInformation(Session session) {
@@ -386,13 +338,12 @@ public class Main {
                 Class<?>[] pTypes = cons.getParameterTypes();
                 Object[] args = new Object[pTypes.length];
                 boolean valid = true;
-
                 for (int i = 0; i < pTypes.length; i++) {
                     Class<?> p = pTypes[i];
                     if (p == String.class) {
                         args[i] = "pl_pl";
                     } else if (p == int.class || p == Integer.class) {
-                        args[i] = 8; // render distance
+                        args[i] = 8;
                     } else if (p == boolean.class || p == Boolean.class) {
                         args[i] = true;
                     } else if (p.isEnum()) {
@@ -408,11 +359,10 @@ public class Main {
                         args[i] = null;
                     }
                 }
-
                 if (valid) {
                     try {
                         session.send((Packet) cons.newInstance(args));
-                        System.out.println("[BOT] Wysyłano informacje o kliencie (ClientInformation)");
+                        System.out.println("[BOT] Wysłano informacje o kliencie (ClientInformation)");
                         return;
                     } catch (Exception ignored) {}
                 }
@@ -471,7 +421,6 @@ public class Main {
         try {
             byte[] data = new byte[] { 0x07, 'v', 'a', 'n', 'i', 'l', 'l', 'a' };
             Class<?> customPayloadClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.ServerboundCustomPayloadPacket");
-
             for (Constructor<?> cons : customPayloadClass.getConstructors()) {
                 Class<?>[] pTypes = cons.getParameterTypes();
                 if (pTypes.length == 2) {
@@ -482,7 +431,6 @@ public class Main {
                         Method keyMethod = pTypes[0].getMethod("key", String.class, String.class);
                         arg1 = keyMethod.invoke(null, "minecraft", "brand");
                     }
-
                     if (arg1 != null && pTypes[1] == byte[].class) {
                         session.send((Packet) cons.newInstance(arg1, data));
                         return;
@@ -496,7 +444,6 @@ public class Main {
         new Thread(() -> {
             try {
                 resourcePackFinished = false;
-
                 UUID packId = null;
                 for (Method m : incomingPacket.getClass().getMethods()) {
                     if (m.getParameterCount() == 0 && m.getReturnType() == UUID.class) {
@@ -506,13 +453,10 @@ public class Main {
                         } catch (Exception ignored) {}
                     }
                 }
-
                 Class<?> packetClass = findServerboundResourcePackClass();
                 if (packetClass == null) return;
-
                 Class<?> statusEnum = findStatusEnum(packetClass);
                 if (statusEnum == null) return;
-
                 Object accepted = null, downloaded = null, loaded = null;
                 for (Object constant : statusEnum.getEnumConstants()) {
                     String name = constant.toString().toUpperCase();
@@ -520,18 +464,13 @@ public class Main {
                     if (name.contains("DOWNLOADED")) downloaded = constant;
                     if (name.contains("SUCCESSFULLY_LOADED") || name.equals("LOADED")) loaded = constant;
                 }
-
                 if (accepted != null) sendResourcePackResponse(session, packetClass, packId, accepted);
-                Thread.sleep(1500); // Zamienione z 300 na 1500 ms (czas na udawane pobieranie)
-
+                Thread.sleep(ThreadLocalRandom.current().nextLong(1200, 2200));
                 if (downloaded != null) sendResourcePackResponse(session, packetClass, packId, downloaded);
-                Thread.sleep(1500); // Zamienione z 300 na 1500 ms (czas na udawane ładowanie zasobów)
-
+                Thread.sleep(ThreadLocalRandom.current().nextLong(1500, 2500));
                 if (loaded != null) sendResourcePackResponse(session, packetClass, packId, loaded);
-                Thread.sleep(500);
-
+                Thread.sleep(400);
                 resourcePackFinished = true;
-
             } catch (Exception e) {
                 System.err.println("[BOT] Błąd paczki zasobów: " + e.getMessage());
             }
@@ -543,7 +482,6 @@ public class Main {
             Set<URL> urls = new HashSet<>();
             try { urls.add(Session.class.getProtectionDomain().getCodeSource().getLocation()); } catch (Throwable ignored) {}
             try { urls.add(Main.class.getProtectionDomain().getCodeSource().getLocation()); } catch (Throwable ignored) {}
-
             for (URL location : urls) {
                 if (location == null) continue;
                 java.io.File file = new java.io.File(location.toURI());
@@ -583,7 +521,6 @@ public class Main {
     }
 
     private static void sendResourcePackResponse(Session session, Class<?> packetClass, UUID packId, Object status) {
-        if (status == null) return;
         for (Constructor<?> cons : packetClass.getConstructors()) {
             try {
                 Class<?>[] types = cons.getParameterTypes();
@@ -613,7 +550,6 @@ public class Main {
                     actionTypeClass = Class.forName("org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickType");
                 } catch (ClassNotFoundException ignored) {}
             }
-
             Object actionType = null;
             if (actionTypeClass != null) {
                 Object[] actionConstants = actionTypeClass.getEnumConstants();
@@ -627,7 +563,6 @@ public class Main {
                     if (actionType == null && actionConstants.length > 0) actionType = actionConstants[0];
                 }
             }
-
             Object containerAction = null;
             String[] actionClassNames = new String[] {
                 "org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerAction$ClickItemAction",
@@ -674,19 +609,16 @@ public class Main {
                     break;
                 } catch (ClassNotFoundException ignored) {}
             }
-
             if (clickPacketClass == null) {
                 System.err.println("[BOT] Błąd: nie odnaleziono klasy pakietu kliknięcia kontenera.");
                 return;
             }
 
             Object packet = null;
-            Constructor<?>[] constructors = clickPacketClass.getConstructors();
-            for (Constructor<?> cons : constructors) {
+            for (Constructor<?> cons : clickPacketClass.getConstructors()) {
                 Class<?>[] pTypes = cons.getParameterTypes();
                 Object[] args = new Object[pTypes.length];
                 boolean valid = true;
-
                 for (int i = 0; i < pTypes.length; i++) {
                     Class<?> p = pTypes[i];
                     if (p == int.class || p == Integer.class) {
@@ -711,7 +643,6 @@ public class Main {
                         valid = false;
                     }
                 }
-
                 if (valid) {
                     try {
                         packet = cons.newInstance(args);
@@ -719,11 +650,9 @@ public class Main {
                     } catch (Exception ignored) {}
                 }
             }
-
             if (packet != null) {
                 session.send((Packet) packet);
             }
-
         } catch (Exception e) {
             System.err.println("[BOT] Błąd kliknięcia slotu: " + e.getMessage());
         }
@@ -738,7 +667,6 @@ public class Main {
             if (n2.contains("ClientNetworkSession")) return 1;
             return n1.compareTo(n2);
         });
-
         for (Class<?> clazz : classes) {
             if (!clazz.isInterface() && !Modifier.isAbstract(clazz.getModifiers())) {
                 Session session = tryInstantiateSessionClass(clazz, host, port, protocol);
@@ -755,9 +683,7 @@ public class Main {
         for (Constructor<?> cons : clazz.getConstructors()) {
             Class<?>[] types = cons.getParameterTypes();
             Object[] args = new Object[types.length];
-
             boolean hostAssigned = false, portAssigned = false;
-
             for (int i = 0; i < types.length; i++) {
                 Class<?> t = types[i];
                 if (Executor.class.isAssignableFrom(t) || t.getName().contains("Executor")) {
@@ -783,7 +709,6 @@ public class Main {
                     args[i] = null;
                 }
             }
-
             try {
                 cons.setAccessible(true);
                 Object obj = cons.newInstance(args);
@@ -815,7 +740,6 @@ public class Main {
             Set<URL> urls = new HashSet<>();
             try { urls.add(Session.class.getProtectionDomain().getCodeSource().getLocation()); } catch (Throwable ignored) {}
             try { urls.add(Main.class.getProtectionDomain().getCodeSource().getLocation()); } catch (Throwable ignored) {}
-
             for (URL location : urls) {
                 if (location == null) continue;
                 java.io.File file = new java.io.File(location.toURI());
