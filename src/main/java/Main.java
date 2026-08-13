@@ -233,19 +233,9 @@ public class Main {
 
     private static void sendUseItemPacket(Session session, int sequence) {
         try {
-            Constructor<?>[] constructors = ServerboundUseItemPacket.class.getConstructors();
-            for (Constructor<?> cons : constructors) {
-                Class<?>[] pTypes = cons.getParameterTypes();
-                if (pTypes.length == 2 && pTypes[0] == Hand.class && (pTypes[1] == int.class || pTypes[1] == Integer.class)) {
-                    session.send((Packet) cons.newInstance(Hand.MAIN_HAND, sequence));
-                    return;
-                }
-            }
-            session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, sequence));
+            session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, sequence, 0.0f, 0.0f));
         } catch (Exception e) {
-            try {
-                session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0));
-            } catch (Exception ignored) {}
+            System.err.println("[BOT] Błąd podczas wysyłania ServerboundUseItemPacket: " + e.getMessage());
         }
     }
 
