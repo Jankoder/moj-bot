@@ -1,7 +1,7 @@
 package com.bot;
 
-import org.geysermc.mcprotocollib.network.Client;
 import org.geysermc.mcprotocollib.network.Session;
+import org.geysermc.mcprotocollib.network.tcp.TcpClientSession;
 import org.geysermc.mcprotocollib.network.event.session.DisconnectedEvent;
 import org.geysermc.mcprotocollib.network.event.session.PacketReceivedEvent;
 import org.geysermc.mcprotocollib.network.event.session.SessionAdapter;
@@ -12,6 +12,8 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.Serv
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClickPacket;
 import org.geysermc.mcprotocollib.protocol.data.game.inventory.ClickType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 
 import java.util.Hashtable;
 import javax.naming.directory.Attributes;
@@ -28,7 +30,7 @@ public class Main {
 
     public static void main(String[] args) {
         System.out.println("=================================");
-        System.out.println("   AUTORSKI BOT AFK 1.20.4       ");
+        System.out.println("   AUTORSKI BOT AFK 1.21.x       ");
         System.out.println("   (MCProtocolLib + Maven)       ");
         System.out.println("=================================");
 
@@ -41,11 +43,13 @@ public class Main {
                 System.out.println("[BOT] Łączenie z " + targetHost + ":" + targetPort + " jako nick: " + USERNAME + "...");
 
                 MinecraftProtocol protocol = new MinecraftProtocol(USERNAME);
-                Client client = new Client(targetHost, targetPort, protocol);
+                
+                // W 1.21 używamy bezpośrednio TcpClientSession zamiast usuniętej klasy Client
+                Session session = new TcpClientSession(targetHost, targetPort, protocol);
 
                 activeContainerId = -1;
 
-                client.getSession().addListener(new SessionAdapter() {
+                session.addListener(new SessionAdapter() {
                     @Override
                     public void packetReceived(PacketReceivedEvent event) {
                         try {
@@ -76,7 +80,7 @@ public class Main {
                                                     System.out.println("[BOT] [GUI] Znaleziono 'AnarchiaSMP' w slocie numer " + slotIndex + "!");
                                                     
                                                     // Klikamy w znaleziony slot
-                                                    clickSlot(client.getSession(), activeContainerId, slotIndex, item);
+                                                    clickSlot(session, activeContainerId, slotIndex, item);
                                                     
                                                     activeContainerId = -1;
                                                     break;
@@ -96,12 +100,12 @@ public class Main {
                     }
                 });
 
-                client.connect();
+                session.connect();
                 System.out.println("[BOT] [OK] Wysłano żądanie połączenia...");
 
-                startBotSequence(client.getSession());
+                startBotSequence(session);
 
-                while (client.getSession() != null && client.getSession().isConnected()) {
+                while (session != null && session.isConnected()) {
                     Thread.sleep(1000);
                 }
 
@@ -135,21 +139,22 @@ public class Main {
                 System.out.println("[BOT] Rozpoczynam ruchy weryfikacyjne...");
                 double x = 0, y = 64, z = 0;
 
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, -30.0f, 0.0f));
+                // Konstruktor w 1.21: (double x, double y, double z, float yaw, float pitch, boolean onGround)
+                session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, -30.0f, 0.0f, true));
                 Thread.sleep(500);
-                session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 30.0f, 0.0f));
+                session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, 30.0f, 0.0f, true));
                 Thread.sleep(500);
 
                 System.out.println("[BOT] Idę do przodu...");
                 for (int i = 0; i < 6; i++) {
                     z += 0.5;
-                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, x, y, z, 0.0f, 0.0f));
+                    session.send(new ServerboundMovePlayerPosRotPacket(x, y, z, 0.0f, 0.0f, true));
                     Thread.sleep(500);
                 }
 
-                // Użycie kompasu na samym końcu sekwencji
+                // Konstruktor w 1.21 wymaga obrotu głowy (Hand, sequence, yaw, pitch)
                 System.out.println("[BOT] Używam kompasu w dłoni...");
-                session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0));
+                session.send(new ServerboundUseItemPacket(Hand.MAIN_HAND, 0, 0.0f, 0.0f));
 
                 System.out.println("[BOT] Kompas został użyty. Oczekuję na menu serwera...");
 
@@ -161,8 +166,15 @@ public class Main {
 
     private static void clickSlot(Session session, int containerId, int slotIndex, Object clickedItem) {
         try {
+            // W 1.21 dodano wymóg przekazania mapy slotów (ostatni parametr)
             ServerboundContainerClickPacket packet = new ServerboundContainerClickPacket(
-                containerId, 0, slotIndex, 0, ClickType.PICKUP, (org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack) clickedItem, null
+                containerId, 
+                0, 
+                slotIndex, 
+                0, 
+                ClickType.PICKUP, 
+                (ItemStack) clickedItem, 
+                new Int2ObjectOpenHashMap<>()
             );
             session.send(packet);
             System.out.println("[BOT] Wysłano pakiet kliknięcia w slot " + slotIndex);
