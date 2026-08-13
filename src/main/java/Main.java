@@ -79,7 +79,7 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // Zapamiętanie pozycji wysłanej z serwera
+                            // Zapisywanie współrzędnych z serwera (np. po przeteleportowaniu na spawn)
                             if (packetName.contains("PlayerPosition") || packetName.contains("PosRot")) {
                                 updatePositionFromPacket(packet);
                             }
@@ -128,7 +128,7 @@ public class Main {
                                 }
                             }
 
-                            // 4. CZAT SERWERA (BEZ SPAMU)
+                            // 4. CZAT SERWERA (FILTROWANIE SPAMU)
                             if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
                                 String cleanedText = cleanChatMessage(packet.toString());
 
@@ -170,8 +170,8 @@ public class Main {
     private static void startBotSequence(Session session) {
         new Thread(() -> {
             try {
-                // KROK 1: Wejście i logowanie
-                Thread.sleep(2000);
+                // KROK 1: Logowanie
+                Thread.sleep(1500);
                 if (!session.isConnected()) return;
 
                 sendBrandPayload(session);
@@ -179,63 +179,68 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // KROK 2: Czekanie na paczkę
-                System.out.println("[BOT] Czekam na przetworzenie paczki zasobów...");
+                // KROK 2: Paczka zasobów
                 long startWait = System.currentTimeMillis();
-                while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 15000)) {
-                    Thread.sleep(300);
+                while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 10000)) {
+                    if (!session.isConnected()) return;
+                    Thread.sleep(200);
                 }
 
                 if (!session.isConnected()) return;
 
-                System.out.println("[BOT] Odczekuję 5 sekund na stabilizację...");
-                Thread.sleep(5000);
-
-                // KROK 3: Wybór kompasu w dłoni (slot 4)
-                System.out.println("[BOT] Wybieram slot 4 (kompas)...");
-                session.send(new ServerboundSetCarriedItemPacket(4));
+                // Odczekanie chwili na zsynchronizowanie pozycji
                 Thread.sleep(1000);
+                if (!session.isConnected()) return;
 
-                // KROK 4: TWOJA SEKWENCJA RUCHU
-                System.out.println("[BOT] [RUCH] Obracam lekko w prawo...");
+                // KROK 3: NATYCHMIASTOWY RUCH (Weryfikacja 5/5)
+                System.out.println("[BOT] [RUCH] Wykonuję weryfikację ruchu...");
+                
+                // Obrót w prawo
                 currentYaw = 45.0f;
-                currentPitch = 0.0f;
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
-                Thread.sleep(600);
+                Thread.sleep(300);
+                if (!session.isConnected()) return;
 
-                System.out.println("[BOT] [RUCH] Obracam lekko w lewo...");
+                // Obrót w lewo
                 currentYaw = -45.0f;
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
-                Thread.sleep(600);
+                Thread.sleep(300);
+                if (!session.isConnected()) return;
 
-                System.out.println("[BOT] [RUCH] Prostuję wzrok...");
+                // Wyprostowanie wzroku
                 currentYaw = 0.0f;
                 currentPitch = 0.0f;
                 session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
-                Thread.sleep(400);
+                Thread.sleep(200);
+                if (!session.isConnected()) return;
 
-                System.out.println("[BOT] [RUCH] Idę do przodu przez 8 sekund...");
-                long walkStartTime = System.currentTimeMillis();
-                while (System.currentTimeMillis() - walkStartTime < 8000) {
+                // Chodzenie do przodu – płynne kroki co 150 ms
+                System.out.println("[BOT] [RUCH] Idę do przodu...");
+                for (int i = 0; i < 20; i++) { // 20 kroków = ok. 3 sekundy stabilnego marszu
                     if (!session.isConnected()) return;
-                    currentZ += 0.2; // marsz do przodu
+                    currentZ += 0.2;
                     session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
-                    Thread.sleep(200);
+                    Thread.sleep(150);
                 }
 
-                System.out.println("[BOT] [RUCH] Marsz ukończony!");
-                Thread.sleep(500);
+                System.out.println("[BOT] [RUCH] Weryfikacja ruchu zakończona!");
+                Thread.sleep(1000);
+                if (!session.isConnected()) return;
 
-                // KROK 5: Użycie kompasu
-                System.out.println("[BOT] Klikam kompasem w dłoni...");
+                // KROK 4: Zmiana slotu na kompas i użycie
+                System.out.println("[BOT] Wybieram slot 4 (kompas)...");
+                session.send(new ServerboundSetCarriedItemPacket(4));
+                Thread.sleep(800);
+                if (!session.isConnected()) return;
+
+                System.out.println("[BOT] Klikam kompasem...");
                 compassClicked = true;
-                
                 int seq = sequenceCounter.incrementAndGet();
                 session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
                 sendUseItemPacket(session, seq);
 
             } catch (Exception e) {
-                System.err.println("[BOT] Błąd sekwencji: " + e.getMessage());
+                System.err.println("[BOT] Błąd w sekwencji bota: " + e.getMessage());
             }
         }).start();
     }
@@ -254,8 +259,7 @@ public class Main {
                 idx = end;
             }
         }
-        String result = sb.toString().trim();
-        return result.isEmpty() ? "" : result;
+        return sb.toString().trim();
     }
 
     private static void updatePositionFromPacket(Packet packet) {
@@ -336,13 +340,13 @@ public class Main {
                 }
 
                 if (accepted != null) sendResourcePackResponse(session, packetClass, packId, accepted);
-                Thread.sleep(500);
+                Thread.sleep(300);
 
                 if (downloaded != null) sendResourcePackResponse(session, packetClass, packId, downloaded);
-                Thread.sleep(500);
+                Thread.sleep(300);
 
                 if (loaded != null) sendResourcePackResponse(session, packetClass, packId, loaded);
-                Thread.sleep(1000);
+                Thread.sleep(500);
 
                 resourcePackFinished = true;
 
@@ -650,7 +654,7 @@ public class Main {
             DirContext ctx = new InitialDirContext(env);
             Attributes attrs = ctx.getAttributes("_minecraft._tcp." + host, new String[]{"SRV"});
             if (attrs != null && attrs.get("SRV") != null) {
-                String[] srvData = attrs.get("SRV").get().toString().split(" ");
+                String[] srvData = attrs.get("SRV") .get().toString().split(" ");
                 if (srvData.length >= 4) {
                     String targetHost = srvData[3];
                     if (targetHost.endsWith(".")) targetHost = targetHost.substring(0, targetHost.length() - 1);
