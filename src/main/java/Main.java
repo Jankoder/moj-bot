@@ -10,7 +10,6 @@ import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.Serverbound
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundUseItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSetCarriedItemPacket;
 import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundSwingPacket;
-import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
@@ -80,7 +79,7 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // 0. POTWIERDZANIE TELEPORTACJI I AKTUALIZACJA POZYCJI (KLUCZOWE DLA ANTY-CHETA)
+                            // 0. POTWIERDZANIE TELEPORTACJI I AKTUALIZACJA POZYCJI
                             if (packetName.contains("PlayerPosition") || packetName.contains("PosRot")) {
                                 handlePlayerPositionPacket(session, packet);
                             }
@@ -129,7 +128,7 @@ public class Main {
                                 }
                             }
 
-                            // 4. CZAT SERWERA (FILTROWANIE SPAMU)
+                            // 4. CZAT SERWERA
                             if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
                                 String cleanedText = cleanChatMessage(packet.toString());
 
@@ -182,7 +181,7 @@ public class Main {
             }
             positionReceived = true;
 
-            // Odsyłanie potwierdzenia teleportu (Accept Teleportation)
+            // Confirm Teleportation Packet
             for (Method m : packet.getClass().getMethods()) {
                 if (m.getName().toLowerCase().contains("teleportid") && m.getParameterCount() == 0) {
                     int teleportId = (int) m.invoke(packet);
@@ -221,7 +220,7 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // KROK 2: Paczka zasobów
+                // KROK 2: Czekamy na paczkę zasobów
                 long startWait = System.currentTimeMillis();
                 while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 10000)) {
                     if (!session.isConnected()) return;
@@ -230,7 +229,7 @@ public class Main {
 
                 if (!session.isConnected()) return;
 
-                // Czekamy na odebranie pierwszej pozycji z serwera
+                // Czekamy na pierwszą pozycję ze świata
                 startWait = System.currentTimeMillis();
                 while (!positionReceived && (System.currentTimeMillis() - startWait < 5000)) {
                     if (!session.isConnected()) return;
@@ -240,25 +239,12 @@ public class Main {
                 Thread.sleep(1000);
                 if (!session.isConnected()) return;
 
-                // KROK 3: WERYFIKACJA RUCHU (Przesuwanie bota tak, aby serwer to zaliczył)
-                System.out.println("[BOT] [RUCH] Rozpoczynam zaliczanie weryfikacji pozycji...");
+                // KROK 3: ZALICZANIE WERYFIKACJI RUCHU (20 Hz z obracaniem głowy)
+                performMovementVerification(session);
 
-                for (int i = 1; i <= 6; i++) {
-                    if (!session.isConnected()) return;
-
-                    currentX += 0.3;
-                    currentZ += 0.3;
-
-                    session.send(new ServerboundMovePlayerPosRotPacket(true, false, currentX, currentY, currentZ, currentYaw, currentPitch));
-                    
-                    Thread.sleep(250);
-                }
-
-                System.out.println("[BOT] [RUCH] Wykonano sekwencję kroków!");
-                Thread.sleep(1500);
                 if (!session.isConnected()) return;
 
-                // KROK 4: Wybór slotu i kompasu
+                // KROK 4: Wybór slotu i użycie kompasu
                 System.out.println("[BOT] Wybieram slot 4 (kompas)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
                 Thread.sleep(800);
@@ -274,6 +260,57 @@ public class Main {
                 System.err.println("[BOT] Błąd w sekwencji bota: " + e.getMessage());
             }
         }).start();
+    }
+
+    private static void performMovementVerification(Session session) {
+        System.out.println("[BOT] [RUCH] Rozpoczynam płynną weryfikację ruchu (20 Hz, kręcenie głową)...");
+
+        float baseYaw = currentYaw;
+        double speed = 0.12; // Umiarkowana prędkość chodzenia (~2.4 bloku/s)
+
+        // Wykonujemy 140 kroków po 50 ms (~7 sekund ciągłego ruchu)
+        for (int i = 0; i < 140; i++) {
+            if (!session.isConnected()) return;
+
+            // Rozglądanie w lewo i prawo (odchylenie od -35° do +35°)
+            float yawOffset = (float) (Math.sin(i * 0.15) * 35.0);
+            currentYaw = baseYaw + yawOffset;
+
+            // Obliczanie kierunku chodzenia z uwzględnieniem obrotu
+            double rad = Math.toRadians(currentYaw);
+            currentX -= Math.sin(rad) * speed;
+            currentZ += Math.cos(rad) * speed;
+
+            // Wysyłanie pakietu pozycji i obrotu (onGround = true)
+            sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
+
+            try {
+                Thread.sleep(50); // Dokładnie 20 ticków na sekundę
+            } catch (InterruptedException e) {
+                break;
+            }
+        }
+
+        System.out.println("[BOT] [RUCH] Zakończono sekwencję ruchu!");
+    }
+
+    private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround) {
+        try {
+            Class<?> moveClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket");
+            for (Constructor<?> cons : moveClass.getConstructors()) {
+                Class<?>[] types = cons.getParameterTypes();
+                if (types.length == 6 && types[0] == double.class) {
+                    session.send((Packet) cons.newInstance(x, y, z, yaw, pitch, onGround));
+                    return;
+                } else if (types.length == 7 && types[0] == boolean.class) {
+                    session.send((Packet) cons.newInstance(onGround, false, x, y, z, yaw, pitch));
+                    return;
+                } else if (types.length == 7 && types[0] == double.class) {
+                    session.send((Packet) cons.newInstance(x, y, z, yaw, pitch, onGround, false));
+                    return;
+                }
+            }
+        } catch (Exception ignored) {}
     }
 
     private static String cleanChatMessage(String raw) {
