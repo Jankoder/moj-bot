@@ -164,8 +164,8 @@ public class Main {
                     Thread.sleep(300);
                 }
 
-                // USTAWIONO SLOT 4 (ŚRODKOWY SLOT HOTBARA)
-                System.out.println("[BOT] Wybieram slot 4 (środkowy) w ekwipunku...");
+                // USTAWIONO SLOT 4 (DLA 5. OKIENKA NA EKRANIE)
+                System.out.println("[BOT] Wybieram slot 4 (5. okienko z kompasem)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
                 Thread.sleep(500);
 
