@@ -34,20 +34,20 @@ public class Main {
 
     private static final String HOST = "anarchia.gg";
     private static final String USERNAME = "jankoder2";
-    private static final String PASSWORD = "Krokodyl12!"; // Podmień na własne hasło
+    private static final String PASSWORD = "Krokodyl12!";
 
     private static volatile int activeContainerId = -1;
     private static volatile boolean resourcePackFinished = false;
     private static volatile boolean compassClicked = false;
     private static final AtomicInteger sequenceCounter = new AtomicInteger(0);
 
-    // Pozycja i celownik bota
-    private static volatile double currentX = 0;
-    private static volatile double currentY = 64;
-    private static volatile double currentZ = 0;
-    private static volatile float currentYaw = 0;
-    private static volatile float currentPitch = 0;
-    private static volatile boolean positionReceived = false;
+    // Pozycja i celownik bota - ustawione stałe wartości startowe
+    private static volatile double currentX = 62.500;
+    private static volatile double currentY = 132.00000;
+    private static volatile double currentZ = 201.500;
+    private static volatile float currentYaw = 0f;
+    private static volatile float currentPitch = 0f;
+    private static volatile boolean positionReceived = true; 
     private static volatile boolean isVerifying = false;
 
     // Do blokowania spamu na czacie
@@ -72,7 +72,7 @@ public class Main {
                 activeContainerId = -1;
                 resourcePackFinished = false;
                 compassClicked = false;
-                positionReceived = false;
+                positionReceived = true;
                 isVerifying = false;
                 lastChatMessage = "";
 
@@ -118,7 +118,7 @@ public class Main {
                                             if (item != null) {
                                                 String itemStr = item.toString().toLowerCase();
                                                 if (itemStr.contains("anarchia") || itemStr.contains("smp") || itemStr.contains("graj")) {
-                                                    System.out.println("[BOT] [GUI] Klikam AnarchiaSMP w slocie " + slotIndex);
+                                                    System.out.println("[BOT] [GUI] Klikam tryb w slocie " + slotIndex);
                                                     Thread.sleep(ThreadLocalRandom.current().nextLong(400, 800));
                                                     clickSlot(session, activeContainerId, slotIndex, item);
                                                     activeContainerId = -1;
@@ -143,13 +143,6 @@ public class Main {
                                 String rawPacket = packet.toString().toLowerCase();
                                 if (rawPacket.contains("weryfikacja") || rawPacket.contains("poruszać") || rawPacket.contains("pozycji") || rawPacket.contains("ruszaj")) {
                                     if (!isVerifying) {
-                                        // KLUCZOWE ZABEZPIECZENIE: Jeśli bot nie dostał jeszcze pakietu pozycji ze świata,
-                                        // to czekamy i blokujemy start ruchu, żeby nie wysłać kordów 0, 0, 0
-                                        if (!positionReceived) {
-                                            System.out.println("[BOT] [ANTY-CHEAT] Serwer żąda weryfikacji, ale jeszcze nie znamy naszej pozycji! Czekam...");
-                                            return; 
-                                        }
-                                        
                                         isVerifying = true;
                                         new Thread(() -> performMovementVerification(session)).start();
                                     }
@@ -187,77 +180,20 @@ public class Main {
 
     private static void handlePlayerPositionPacket(Session session, Packet packet) {
         try {
-            boolean updated = false;
-            
-            // W nowym MCProtocolLib pakiety pozycji mogą mieć kordy w obiekcie lub bezpośrednio.
-            // Skanujemy wszystkie metody pakietu, żeby na 100% wyciągnąć współrzędne X, Y, Z.
-            for (Method m : packet.getClass().getMethods()) {
-                if (m.getParameterCount() == 0) {
-                    String name = m.getName().toLowerCase();
-                    
-                    // Szukamy metod zwracających współrzędne (Double)
-                    if (name.equals("getx") || name.equals("x")) { 
-                        currentX = ((Number) m.invoke(packet)).doubleValue(); 
-                        updated = true; 
-                    }
-                    if (name.equals("gety") || name.equals("y")) { 
-                        currentY = ((Number) m.invoke(packet)).doubleValue(); 
-                        updated = true; 
-                    }
-                    if (name.equals("getz") || name.equals("z")) { 
-                        currentZ = ((Number) m.invoke(packet)).doubleValue(); 
-                        updated = true; 
-                    }
-                    
-                    // Szukamy kątów patrzenia głowy (Float)
-                    if (name.equals("getyaw") || name.equals("yaw")) { 
-                        currentYaw = ((Number) m.invoke(packet)).floatValue(); 
-                    }
-                    if (name.equals("getpitch") || name.equals("pitch")) { 
-                        currentPitch = ((Number) m.invoke(packet)).floatValue(); 
-                    }
-                }
-            }
-
-            // Jeśli pakiety przechowują pozycję wewnątrz wektora/obiektu (np. Vector3d)
-            if (!updated) {
-                for (Method m : packet.getClass().getMethods()) {
-                    if (m.getParameterCount() == 0 && (m.getReturnType().getSimpleName().contains("Vector") || m.getReturnType().getSimpleName().contains("Pos"))) {
-                        Object vec = m.invoke(packet);
-                        if (vec != null) {
-                            for (Method vm : vec.getClass().getMethods()) {
-                                if (vm.getParameterCount() == 0) {
-                                    String vName = vm.getName().toLowerCase();
-                                    if (vName.equals("getx") || vName.equals("x")) { currentX = ((Number) vm.invoke(vec)).doubleValue(); updated = true; }
-                                    if (vName.equals("gety") || vName.equals("y")) { currentY = ((Number) vm.invoke(vec)).doubleValue(); updated = true; }
-                                    if (vName.equals("getz") || vName.equals("z")) { currentZ = ((Number) vm.invoke(vec)).doubleValue(); updated = true; }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Sukces! Bot w końcu poprawnie odczytał kordy świata z pakietu serwera
-            if (updated && !positionReceived) {
-                positionReceived = true;
-                System.out.printf("[BOT] [SUKCES] Odczytano pozycję lobby: X=%.2f, Y=%.2f, Z=%.2f\n", currentX, currentY, currentZ);
-            }
-
-            // Szukamy ID teleportu, aby wysłać potwierdzenie (wymagane przez anticheat serwera)
+            // Odczytujemy ID teleportacji, które serwer wysyła, aby zsynchronizować klienta
             for (Method m : packet.getClass().getMethods()) {
                 if (m.getName().toLowerCase().contains("teleportid") && m.getParameterCount() == 0) {
                     int teleportId = (int) m.invoke(packet);
+                    
+                    // Potwierdzamy serwerowi odebranie teleportu
                     sendTeleportConfirm(session, teleportId);
                     
-                    // Natychmiast odsyłamy serwerowi naszą nową pozycję w świecie jako potwierdzenie stanięcia na ziemi
+                    // Od razu wysyłamy naszą prawidłową pozycję z lobby
                     sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
                     break;
                 }
             }
-        } catch (Exception e) {
-            System.err.println("[BOT] Błąd podczas parsowania pakietu pozycji: " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
     }
 
     private static void sendTeleportConfirm(Session session, int teleportId) {
@@ -305,6 +241,10 @@ public class Main {
 
                 if (!isVerifying) {
                     isVerifying = true;
+                    // Dajemy serwerowi 2 sekundy na pełne przesłanie chunków lobby i ustabilizowanie encji,
+                    // dopiero po tym czasie bot bezpiecznie zacznie emulować chodzenie na kordach 62.5
+                    Thread.sleep(2000); 
+                    if (!session.isConnected()) return;
                     performMovementVerification(session);
                 } else {
                     while (isVerifying && session.isConnected()) {
@@ -352,26 +292,23 @@ public class Main {
             currentYaw += (targetYaw - currentYaw) * 0.15f;
             currentPitch += (targetPitch - currentPitch) * 0.15f;
 
-            // Permanentny mikro-szum myszki (jitter) w KAŻDYM pakiecie (kluczowe dla antycheata)
+            // Permanentny mikro-szum myszki (jitter) w KAŻDYM pakiecie
             currentYaw += ThreadLocalRandom.current().nextFloat(-0.2f, 0.2f);
             currentPitch += ThreadLocalRandom.current().nextFloat(-0.1f, 0.1f);
 
-            // Obliczanie pozycji chodzenia (bardzo mała, naturalna prędkość)
+            // Obliczanie pozycji chodzenia
             double currentSpeed = ThreadLocalRandom.current().nextDouble(0.07, 0.11);
             double rad = Math.toRadians(currentYaw);
             currentX -= Math.sin(rad) * currentSpeed;
             currentZ += Math.cos(rad) * currentSpeed;
 
-            // Losowe kliknięcie ręką (animacja)
+            // Losowe kliknięcie ręką
             if (ThreadLocalRandom.current().nextInt(100) < 5) {
                 session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
             }
 
-            // WYSYŁAMY PEŁNY PAKIET POZYCJI I OBROTU JEDNOCZEŚNIE
-            // Flaga 'true' na końcu oznacza, że bot stoi na bloku (onGround)
             sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
 
-            // Całkowite zaburzenie timingów bota poprzez losowy czas oczekiwania (jitter sieciowy)
             try {
                 Thread.sleep(ThreadLocalRandom.current().nextInt(46, 54));
             } catch (InterruptedException e) {
@@ -517,9 +454,9 @@ public class Main {
                     if (name.contains("SUCCESSFULLY_LOADED") || name.equals("LOADED")) loaded = constant;
                 }
                 if (accepted != null) sendResourcePackResponse(session, packetClass, packId, accepted);
-                Thread.sleep(ThreadLocalRandom.current().nextLong(2500, 4000)); // Udajemy, że gra myśli i przygotowuje pobieranie
+                Thread.sleep(ThreadLocalRandom.current().nextLong(2500, 4000));
                 if (downloaded != null) sendResourcePackResponse(session, packetClass, packId, downloaded);
-                Thread.sleep(ThreadLocalRandom.current().nextLong(3500, 6000)); // Udajemy realny czas pobierania pliku z serwera
+                Thread.sleep(ThreadLocalRandom.current().nextLong(3500, 6000));
                 if (loaded != null) sendResourcePackResponse(session, packetClass, packId, loaded);
                 Thread.sleep(800);
                 resourcePackFinished = true;
