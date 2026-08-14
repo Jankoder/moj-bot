@@ -131,21 +131,13 @@ public class Main {
                                 }
                             }
 
-                            // 4. CZAT SERWERA I NATYCHMIASTOWA REAKCJA NA WERYFIKACJĘ
+                            // 4. CZAT SERWERA
                             if (packetName.contains("SystemChat") || packetName.contains("Chat")) {
                                 String cleanedText = cleanChatMessage(packet.toString());
 
                                 if (!cleanedText.isEmpty() && !cleanedText.equals(lastChatMessage)) {
                                     lastChatMessage = cleanedText;
                                     System.out.println("[BOT] [CZAT] " + cleanedText);
-                                }
-
-                                String rawPacket = packet.toString().toLowerCase();
-                                if (rawPacket.contains("weryfikacja") || rawPacket.contains("poruszać") || rawPacket.contains("pozycji") || rawPacket.contains("ruszaj")) {
-                                    if (!isVerifying) {
-                                        isVerifying = true;
-                                        new Thread(() -> performMovementVerification(session)).start();
-                                    }
                                 }
                             }
 
@@ -180,16 +172,29 @@ public class Main {
 
     private static void handlePlayerPositionPacket(Session session, Packet packet) {
         try {
-            // Odczytujemy ID teleportacji, które serwer wysyła, aby zsynchronizować klienta
             for (Method m : packet.getClass().getMethods()) {
                 if (m.getName().toLowerCase().contains("teleportid") && m.getParameterCount() == 0) {
                     int teleportId = (int) m.invoke(packet);
                     
-                    // Potwierdzamy serwerowi odebranie teleportu
+                    // 1. Potwierdzamy serwerowi odebranie teleportu
                     sendTeleportConfirm(session, teleportId);
                     
-                    // Od razu wysyłamy naszą prawidłową pozycję z lobby
+                    // 2. Wysyłamy pakiet zerowy (potwierdzenie stanięcia na klocku startowym)
                     sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
+                    
+                    // 3. KLUCZOWE: Czekamy chwilę przed uruchomieniem emulacji chodu
+                    if (!isVerifying) {
+                        isVerifying = true;
+                        new Thread(() -> {
+                            try { 
+                                // Czekamy 2 sekundy, aż serwer przetworzy połączenie i załaduje świat
+                                Thread.sleep(2000); 
+                            } catch (Exception ignored) {}
+                            if (session.isConnected()) {
+                                performMovementVerification(session);
+                            }
+                        }).start();
+                    }
                     break;
                 }
             }
@@ -222,36 +227,28 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
+                // Czekamy na obsługę resource packa
                 long startWait = System.currentTimeMillis();
                 while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 12000)) {
                     if (!session.isConnected()) return;
-                    if (isVerifying) break;
                     Thread.sleep(200);
                 }
-                if (!session.isConnected()) return;
-
-                startWait = System.currentTimeMillis();
-                while (!positionReceived && (System.currentTimeMillis() - startWait < 6000)) {
-                    if (!session.isConnected()) return;
-                    if (isVerifying) break;
-                    Thread.sleep(100);
-                }
-                Thread.sleep(1200);
-                if (!session.isConnected()) return;
-
-                if (!isVerifying) {
-                    isVerifying = true;
-                    // Dajemy serwerowi 2 sekundy na pełne przesłanie chunków lobby i ustabilizowanie encji,
-                    // dopiero po tym czasie bot bezpiecznie zacznie emulować chodzenie na kordach 62.5
-                    Thread.sleep(2000); 
-                    if (!session.isConnected()) return;
-                    performMovementVerification(session);
-                } else {
-                    while (isVerifying && session.isConnected()) {
-                        Thread.sleep(100);
+                
+                // Czekamy, aż ruch się zakończy (sterowane przez handlePlayerPositionPacket)
+                while (!compassClicked && session.isConnected()) {
+                    if (isVerifying) {
+                        // Jeśli ruch się wykonuje, czekamy spokojnie na jego koniec
+                        Thread.sleep(200);
+                    } else if (positionReceived) {
+                        // Jeśli pozycja została potwierdzona i ruch się zakończył - bierzemy kompas
+                        break;
+                    } else {
+                        Thread.sleep(200);
                     }
                 }
+                
                 if (!session.isConnected()) return;
+                Thread.sleep(1000);
 
                 System.out.println("[BOT] Wybieram slot 4 (kompas)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
@@ -768,13 +765,11 @@ public class Main {
 
     private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround) {
         try {
-            // Prawidłowy konstruktor w Twojej wersji biblioteki (wersja 1.21.1) przyjmuje dokładnie poniższy układ:
             org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket movePacket =
                 new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket(onGround, false, x, y, z, yaw, pitch);
             
             session.send(movePacket);
         } catch (Exception e) {
-            // Blok awaryjny na wypadek gdyby refleksja była wymagana
             try {
                 Class<?> moveClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket");
                 for (java.lang.reflect.Constructor<?> cons : moveClass.getConstructors()) {
