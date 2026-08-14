@@ -34,7 +34,7 @@ public class Main {
 
     private static final String HOST = "anarchia.gg";
     private static final String USERNAME = "jankoder2";
-    private static final String PASSWORD = "Krokodyl12!"; // Podmień na własne hasło
+    private static final String PASSWORD = "TWOJE_HASLO"; // Podmień na własne hasło
 
     private static volatile int activeContainerId = -1;
     private static volatile boolean resourcePackFinished = false;
@@ -188,45 +188,76 @@ public class Main {
     private static void handlePlayerPositionPacket(Session session, Packet packet) {
         try {
             boolean updated = false;
+            
+            // W nowym MCProtocolLib pakiety pozycji mogą mieć kordy w obiekcie lub bezpośrednio.
+            // Skanujemy wszystkie metody pakietu, żeby na 100% wyciągnąć współrzędne X, Y, Z.
             for (Method m : packet.getClass().getMethods()) {
                 if (m.getParameterCount() == 0) {
                     String name = m.getName().toLowerCase();
-                    if (name.equals("getx") || name.equals("x")) {
-                        Object val = m.invoke(packet);
-                        if (val instanceof Double) { currentX = (Double) val; updated = true; }
+                    
+                    // Szukamy metod zwracających współrzędne (Double)
+                    if (name.equals("getx") || name.equals("x")) { 
+                        currentX = ((Number) m.invoke(packet)).doubleValue(); 
+                        updated = true; 
                     }
-                    if (name.equals("gety") || name.equals("y")) {
-                        Object val = m.invoke(packet);
-                        if (val instanceof Double) { currentY = (Double) val; updated = true; }
+                    if (name.equals("gety") || name.equals("y")) { 
+                        currentY = ((Number) m.invoke(packet)).doubleValue(); 
+                        updated = true; 
                     }
-                    if (name.equals("getz") || name.equals("z")) {
-                        Object val = m.invoke(packet);
-                        if (val instanceof Double) { currentZ = (Double) val; updated = true; }
+                    if (name.equals("getz") || name.equals("z")) { 
+                        currentZ = ((Number) m.invoke(packet)).doubleValue(); 
+                        updated = true; 
                     }
-                    if (name.equals("getyaw") || name.equals("yaw")) {
-                        Object val = m.invoke(packet);
-                        if (val instanceof Float) currentYaw = (Float) val;
+                    
+                    // Szukamy kątów patrzenia głowy (Float)
+                    if (name.equals("getyaw") || name.equals("yaw")) { 
+                        currentYaw = ((Number) m.invoke(packet)).floatValue(); 
                     }
-                    if (name.equals("getpitch") || name.equals("pitch")) {
-                        Object val = m.invoke(packet);
-                        if (val instanceof Float) currentPitch = (Float) val;
+                    if (name.equals("getpitch") || name.equals("pitch")) { 
+                        currentPitch = ((Number) m.invoke(packet)).floatValue(); 
                     }
                 }
             }
-            if (updated && !positionReceived) {
-                positionReceived = true;
-                System.out.printf("[BOT] Odczytano pozycję: X=%.2f, Y=%.2f, Z=%.2f\n", currentX, currentY, currentZ);
+
+            // Jeśli pakiety przechowują pozycję wewnątrz wektora/obiektu (np. Vector3d)
+            if (!updated) {
+                for (Method m : packet.getClass().getMethods()) {
+                    if (m.getParameterCount() == 0 && (m.getReturnType().getSimpleName().contains("Vector") || m.getReturnType().getSimpleName().contains("Pos"))) {
+                        Object vec = m.invoke(packet);
+                        if (vec != null) {
+                            for (Method vm : vec.getClass().getMethods()) {
+                                if (vm.getParameterCount() == 0) {
+                                    String vName = vm.getName().toLowerCase();
+                                    if (vName.equals("getx") || vName.equals("x")) { currentX = ((Number) vm.invoke(vec)).doubleValue(); updated = true; }
+                                    if (vName.equals("gety") || vName.equals("y")) { currentY = ((Number) vm.invoke(vec)).doubleValue(); updated = true; }
+                                    if (vName.equals("getz") || vName.equals("z")) { currentZ = ((Number) vm.invoke(vec)).doubleValue(); updated = true; }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
+            // Sukces! Bot w końcu poprawnie odczytał kordy świata z pakietu serwera
+            if (updated && !positionReceived) {
+                positionReceived = true;
+                System.out.printf("[BOT] [SUKCES] Odczytano pozycję lobby: X=%.2f, Y=%.2f, Z=%.2f\n", currentX, currentY, currentZ);
+            }
+
+            // Szukamy ID teleportu, aby wysłać potwierdzenie (wymagane przez anticheat serwera)
             for (Method m : packet.getClass().getMethods()) {
                 if (m.getName().toLowerCase().contains("teleportid") && m.getParameterCount() == 0) {
                     int teleportId = (int) m.invoke(packet);
                     sendTeleportConfirm(session, teleportId);
-                    sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, false);
+                    
+                    // Natychmiast odsyłamy serwerowi naszą nową pozycję w świecie jako potwierdzenie stanięcia na ziemi
+                    sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
                     break;
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            System.err.println("[BOT] Błąd podczas parsowania pakietu pozycji: " + e.getMessage());
+        }
     }
 
     private static void sendTeleportConfirm(Session session, int teleportId) {
