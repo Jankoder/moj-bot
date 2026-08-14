@@ -84,8 +84,8 @@ public class Main {
                         try {
                             String packetName = packet.getClass().getSimpleName();
 
-                            // 0. POTWIERDZANIE TELEPORTACJI I AKTUALIZACJA POZYCJI
-                            if (packetName.contains("PlayerPosition") || packetName.contains("PosRot") || packetName.contains("LookAt")) {
+                            // 0. Rozszerzony filtr na pakiety pozycji (wyłapie PlayerPosition, PosRot, Look, Teleport i PositionLook)
+                            if (packetName.contains("Position") || packetName.contains("PosRot") || packetName.contains("Look") || packetName.contains("Teleport")) {
                                 handlePlayerPositionPacket(session, packet);
                             }
 
@@ -174,30 +174,39 @@ public class Main {
 
     private static void handlePlayerPositionPacket(Session session, Packet packet) {
         try {
+            int teleportId = -1;
+            
+            // Szukamy metody zwracającej identyfikator teleportu (int)
             for (Method m : packet.getClass().getMethods()) {
-                if (m.getName().toLowerCase().contains("teleportid") && m.getParameterCount() == 0) {
-                    int teleportId = (int) m.invoke(packet);
-                    
-                    // 1. Natychmiast zatwierdzamy ID teleportacji (Kluczowe dla anticheata!)
-                    sendTeleportConfirm(session, teleportId);
-                    
-                    // 2. Odsyłamy serwerowi pakiet zerowy potwierdzający pozycję startową
-                    sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true, false);
-                    
-                    // 3. Uruchamiamy właściwy, chaotyczny marsz dopiero gdy serwer nas odblokuje
-                    if (!isVerifying) {
-                        isVerifying = true;
-                        new Thread(() -> {
-                            try { 
-                                // Dajemy serwerowi 150ms na zarejestrowanie potwierdzenia i ruszamy
-                                Thread.sleep(150); 
-                            } catch (Exception ignored) {}
-                            if (session.isConnected()) {
-                                performMovementVerification(session);
-                            }
-                        }).start();
+                if (m.getParameterCount() == 0 && (m.getReturnType() == int.class || m.getReturnType() == Integer.class)) {
+                    String name = m.getName().toLowerCase();
+                    if (name.contains("teleportid") || name.equals("getid") || name.contains("teleport")) {
+                        teleportId = (int) m.invoke(packet);
+                        break;
                     }
-                    break;
+                }
+            }
+            
+            // Jeśli serwer przesłał prawidłowy identyfikator synchronizacji świata
+            if (teleportId != -1) {
+                // 1. Natychmiast zatwierdzamy ID teleportacji na serwerze
+                sendTeleportConfirm(session, teleportId);
+                
+                // 2. Odsyłamy serwerowi pakiet zerowy (potwierdzenie stanięcia na klocku startowym lobby)
+                sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true, false);
+                
+                // 3. Uruchamiamy właściwy, chaotyczny marsz
+                if (!isVerifying) {
+                    isVerifying = true;
+                    new Thread(() -> {
+                        try { 
+                            // Krótka pauza 150ms sieciowego czasu reakcji gracza i ruszamy
+                            Thread.sleep(150); 
+                        } catch (Exception ignored) {}
+                        if (session.isConnected()) {
+                            performMovementVerification(session);
+                        }
+                    }).start();
                 }
             }
         } catch (Exception ignored) {}
@@ -292,9 +301,7 @@ public class Main {
             currentX -= Math.sin(rad) * currentSpeed;
             currentZ += Math.cos(rad) * currentSpeed;
 
-            // EMULACJA FIZYKI GRAWITACJI: Oryginalny klient gry ze względu na silnik fizyczny Minecrafta
-            // wykonuje mikroskopijne drgania na osi Y (tzw. sub-pixel jitter na krawędziach bloków).
-            // Ustawiamy losowe drganie rzędu 0.0001 bloku, co oszukuje matematyczne testy GrimAC.
+            // EMULACJA FIZYKI GRAWITACJI: Sub-pixel jitter na osi Y
             double physicsJitterY = (i % 2 == 0) ? 0.0001 : -0.0001;
             currentY = baseHeight + physicsJitterY;
 
@@ -303,7 +310,6 @@ public class Main {
             }
 
             // Losowo ustawiamy flagę horizontalCollision (kolizji bocznej) na true w 2% pakietów.
-            // Prawdziwy gracz ociera się o krawędzie hitboxów, bot wysyłający ciągłe false zdradza się przed anticheatem.
             boolean randomCollision = ThreadLocalRandom.current().nextInt(100) < 2;
 
             sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true, randomCollision);
