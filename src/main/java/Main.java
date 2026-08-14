@@ -359,28 +359,6 @@ public class Main {
         } catch (Exception ignored) {}
     }
 
-    private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround) {
-        try {
-            Class<?> moveClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket");
-            for (Constructor<?> cons : moveClass.getConstructors()) {
-                Class<?>[] types = cons.getParameterTypes();
-                if (types.length == 6 && types[0] == double.class) {
-                    session.send((Packet) cons.newInstance(x, y, z, yaw, pitch, onGround));
-                    return;
-                } else if (types.length == 7 && types[0] == boolean.class) {
-                    session.send((Packet) cons.newInstance(onGround, false, x, y, z, yaw, pitch));
-                    return;
-                } else if (types.length == 7 && types[0] == double.class) {
-                    session.send((Packet) cons.newInstance(x, y, z, yaw, pitch, onGround, false));
-                    return;
-                } else if (types.length == 8) {
-                    session.send((Packet) cons.newInstance(x, y, z, yaw, pitch, onGround, false, false));
-                    return;
-                }
-            }
-        } catch (Exception ignored) {}
-    }
-
     private static String cleanChatMessage(String raw) {
         StringBuilder sb = new StringBuilder();
         int idx = 0;
@@ -786,5 +764,27 @@ public class Main {
             }
         } catch (Exception ignored) {}
         return new String[]{host, "25565"};
+    }
+
+    private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround) {
+        try {
+            // W nowym MCProtocolLib 1.21.1 prawidłowy konstruktor pos-rot przyjmuje kolejno:
+            // X (double), Y (double), Z (double), Yaw (float), Pitch (float), onGround (boolean)
+            org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket movePacket =
+                new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket(x, y, z, yaw, pitch, onGround);
+            
+            session.send(movePacket);
+        } catch (Exception e) {
+            // Gdyby klasa zmieniła nazwę, ten awaryjny blok znajdzie właściwy konstruktor
+            try {
+                Class<?> moveClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket");
+                for (java.lang.reflect.Constructor<?> cons : moveClass.getConstructors()) {
+                    if (cons.getParameterCount() == 6) {
+                        session.send((org.geysermc.mcprotocollib.network.packet.Packet) cons.newInstance(x, y, z, yaw, pitch, onGround));
+                        return;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
     }
 }
