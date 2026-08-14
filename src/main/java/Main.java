@@ -34,7 +34,7 @@ public class Main {
 
     private static final String HOST = "anarchia.gg";
     private static final String USERNAME = "jankoder2";
-    private static final String PASSWORD = "TWOJE_HASLO"; // Podmień na własne hasło
+    private static final String PASSWORD = "Krokodyl12!"; // Podmień na własne hasło
 
     private static volatile int activeContainerId = -1;
     private static volatile boolean resourcePackFinished = false;
