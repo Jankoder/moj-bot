@@ -198,12 +198,11 @@ public class Main {
             }
             
             if (teleportId != -1) {
-                // KLUCZOWE: Zawsze bezwzględnie potwierdzamy serwerowi odebranie teleportu!
-                // Poprzedni kod pomijał to w trakcie chodu, co wywoływało natychmiastowy kick.
+                // Potwierdzamy serwerowi odebranie teleportu
                 sendTeleportConfirm(session, teleportId);
                 sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true, false);
                 
-                // Właściwą pętlę chodu odpalamy tylko raz, nie dublujemy wątków
+                // Odpalamy weryfikację ruchu tylko raz
                 if (!isVerifying) {
                     movementFinished = false; 
                     isVerifying = true;
@@ -251,13 +250,12 @@ public class Main {
                     Thread.sleep(200);
                 }
                 
-                // Czekamy, aż ruch się CAŁKOWICIE zakończy i anticheat zaliczy weryfikację
+                // Czekamy, aż weryfikacja ruchu dobiegnie końca
                 while (!movementFinished && session.isConnected()) {
                     Thread.sleep(200);
                 }
                 
                 if (!session.isConnected()) return;
-                // Zwiększamy pauzę do 3 sekund (ludzki czas na otwarcie ekwipunku)
                 Thread.sleep(3000); 
 
                 System.out.println("[BOT] Wybieram slot 4 (kompas)...");
@@ -277,13 +275,15 @@ public class Main {
     }
 
     private static void performMovementVerification(Session session) {
-        System.out.println("[BOT] [RUCH] Uruchamiam bezpieczną emulację ruchu Vanilla...");
+        System.out.println("[BOT] [RUCH] Uruchamiam zaawansowaną emulację rozglądania i podskoków Vanilla...");
         
-        float targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-90f, 90f);
+        // Zapisujemy idealne kordy startowe z Twojego screena lobby
+        double startX = 62.500;
+        double startY = 132.000;
+        double startZ = 201.500;
+        
+        float targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-60f, 60f);
         float targetPitch = ThreadLocalRandom.current().nextFloat(-5f, 5f);
-
-        // Zapamiętujemy startową wysokość, aby emulować mikroskopijne drgania grawitacji na ziemi
-        double baseHeight = currentY;
 
         for (int i = 0; i < 180; i++) {
             if (!session.isConnected()) {
@@ -291,48 +291,50 @@ public class Main {
                 return;
             }
 
-            if (i % 20 == 0) {
-                targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-60f, 60f);
-                targetPitch = ThreadLocalRandom.current().nextFloat(-5f, 5f);
+            // Co 15 ticków człowiek zmienia kierunek patrzenia myszką
+            if (i % 15 == 0) {
+                targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-45f, 45f);
+                targetPitch = ThreadLocalRandom.current().nextFloat(-8f, 8f);
             }
 
-            currentYaw += (targetYaw - currentYaw) * 0.15f;
-            currentPitch += (targetPitch - currentPitch) * 0.15f;
+            // Płynny ruch kamery
+            currentYaw += (targetYaw - currentYaw) * 0.2f;
+            currentPitch += (targetPitch - currentPitch) * 0.2f;
 
-            currentYaw += ThreadLocalRandom.current().nextFloat(-0.6f, 0.6f);
-            currentPitch += ThreadLocalRandom.current().nextFloat(-0.3f, 0.3f);
+            // Drżenie rąk na myszce (Jitter celownika - wymagany przez anticheat!)
+            currentYaw += ThreadLocalRandom.current().nextFloat(-0.4f, 0.4f);
+            currentPitch += ThreadLocalRandom.current().nextFloat(-0.2f, 0.2f);
 
-            // Emulacja momentum/pędu: losowe, drobne wahania prędkości (człowiek nie idzie idealnie równo)
-            double currentSpeed = ThreadLocalRandom.current().nextDouble(0.06, 0.10);
-            double rad = Math.toRadians(currentYaw);
-            currentX -= Math.sin(rad) * currentSpeed;
-            currentZ += Math.cos(rad) * currentSpeed;
+            // EMLUACJA SKAKANIA W MIEJSCU (Ruch osi Y): 
+            // Co drugi pakiet bot udaje mikro-odrywanie się od ziemi, co imituje grawitację
+            double airJitterY = (i % 2 == 0) ? 0.005 : 0.000;
+            currentY = startY + airJitterY;
 
-            // EMULACJA FIZYKI GRAWITACJI: Sub-pixel jitter na osi Y
-            double physicsJitterY = (i % 2 == 0) ? 0.0001 : -0.0001;
-            currentY = baseHeight + physicsJitterY;
-
-            if (ThreadLocalRandom.current().nextInt(100) < 5) {
+            // Machnięcie ręką raz na jakiś czas
+            if (ThreadLocalRandom.current().nextInt(100) < 6) {
                 session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
             }
 
-            // Losowo ustawiamy flagę horizontalCollision (kolizji bocznej) na true w 2% pakietów.
-            boolean randomCollision = ThreadLocalRandom.current().nextInt(100) < 2;
-
-            sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true, randomCollision);
+            // WYSYŁAMY PAKIET: Kordy X i Z stoją idealnie w miejscu spawnu,
+            // ale zmienia się wysokość Y oraz kąty patrzenia myszki!
+            sendMovePacket(session, startX, currentY, startZ, currentYaw, currentPitch, (airJitterY == 0.000), false);
 
             try {
-                Thread.sleep(ThreadLocalRandom.current().nextInt(46, 54));
+                // Naturalny jitter sieciowy pakietów
+                Thread.sleep(ThreadLocalRandom.current().nextInt(47, 53));
             } catch (InterruptedException e) {
                 break;
             }
         }
 
-        // Przywracamy sztywną wysokość po zakończeniu chodu
-        currentY = baseHeight;
+        // Przywracamy bazową pozycję na koniec weryfikacji
+        currentX = startX;
+        currentY = startY;
+        currentZ = startZ;
+        
         System.out.println("[BOT] [RUCH] Sekwencja weryfikacji zakończona pomyślnie!");
         movementFinished = true;
-        isVerifying = false; // Kluczowe czyszczenie flagi na koniec każdego marszu
+        isVerifying = false;
     }
 
     private static void sendClientInformation(Session session) {
