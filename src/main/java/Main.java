@@ -178,19 +178,19 @@ public class Main {
                 if (m.getName().toLowerCase().contains("teleportid") && m.getParameterCount() == 0) {
                     int teleportId = (int) m.invoke(packet);
                     
-                    // 1. Potwierdzamy serwerowi odebranie teleportu
+                    // 1. Natychmiast zatwierdzamy ID teleportacji (Kluczowe dla anticheata!)
                     sendTeleportConfirm(session, teleportId);
                     
-                    // 2. Wysyłamy pakiet zerowy (potwierdzenie stanięcia na klocku startowym)
-                    sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
+                    // 2. Odsyłamy serwerowi pakiet zerowy potwierdzający pozycję startową
+                    sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true, false);
                     
-                    // 3. KLUCZOWE: Czekamy chwilę przed uruchomieniem emulacji chodu
+                    // 3. Uruchamiamy właściwy, chaotyczny marsz dopiero gdy serwer nas odblokuje
                     if (!isVerifying) {
                         isVerifying = true;
                         new Thread(() -> {
                             try { 
-                                // Czekamy 2 sekundy, aż serwer przetworzy połączenie i załaduje świat
-                                Thread.sleep(2000); 
+                                // Dajemy serwerowi 150ms na zarejestrowanie potwierdzenia i ruszamy
+                                Thread.sleep(150); 
                             } catch (Exception ignored) {}
                             if (session.isConnected()) {
                                 performMovementVerification(session);
@@ -229,24 +229,6 @@ public class Main {
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
 
-                // URUCHAMIAMY WĄTEK PODTRZYMYWANIA POZYCJI W TLE (Anty-GrimAC)
-                new Thread(() -> {
-                    System.out.println("[BOT] [ANTY-CHEAT] Uruchamiam wątek podtrzymywania obecności w świecie...");
-                    while (!isVerifying && session.isConnected()) {
-                        try {
-                            // Delikatne, mikroskopijne drganie celownika, udające oddychanie postaci
-                            currentYaw += ThreadLocalRandom.current().nextFloat(-0.02f, 0.02f);
-                            currentPitch += ThreadLocalRandom.current().nextFloat(-0.01f, 0.01f);
-                            
-                            // Wysyłamy serwerowi informację, że stabilnie stoimy na kordach z lobby
-                            sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
-                            
-                            // Pakiety Vanilla lecą dokładnie co 50ms (20 ticków na sekundę)
-                            Thread.sleep(50);
-                        } catch (Exception ignored) {}
-                    }
-                }).start();
-
                 // Czekamy na obsługę resource packa
                 long startWait = System.currentTimeMillis();
                 while (!resourcePackFinished && (System.currentTimeMillis() - startWait < 12000)) {
@@ -281,9 +263,11 @@ public class Main {
     private static void performMovementVerification(Session session) {
         System.out.println("[BOT] [RUCH] Uruchamiam bezpieczną emulację ruchu Vanilla...");
         
-        // Losujemy kierunek, w którym bot zacznie iść
         float targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-90f, 90f);
         float targetPitch = ThreadLocalRandom.current().nextFloat(-5f, 5f);
+
+        // Zapamiętujemy startową wysokość, aby emulować mikroskopijne drgania grawitacji na ziemi
+        double baseHeight = currentY;
 
         for (int i = 0; i < 180; i++) {
             if (!session.isConnected()) {
@@ -291,32 +275,38 @@ public class Main {
                 return;
             }
 
-            // Co 20 ticków (1 sekunda) gracz decyduje się na lekką korektę myszką
             if (i % 20 == 0) {
                 targetYaw = currentYaw + ThreadLocalRandom.current().nextFloat(-60f, 60f);
                 targetPitch = ThreadLocalRandom.current().nextFloat(-5f, 5f);
             }
 
-            // Płynne, ludzkie zbliżanie się celownika do wyznaczonego punktu
             currentYaw += (targetYaw - currentYaw) * 0.15f;
             currentPitch += (targetPitch - currentPitch) * 0.15f;
 
-            // Permanentny mikro-szum myszki (jitter) w KAŻDYM pakiecie
-            currentYaw += ThreadLocalRandom.current().nextFloat(-0.2f, 0.2f);
-            currentPitch += ThreadLocalRandom.current().nextFloat(-0.1f, 0.1f);
+            currentYaw += ThreadLocalRandom.current().nextFloat(-0.6f, 0.6f);
+            currentPitch += ThreadLocalRandom.current().nextFloat(-0.3f, 0.3f);
 
-            // Obliczanie pozycji chodzenia
-            double currentSpeed = ThreadLocalRandom.current().nextDouble(0.07, 0.11);
+            // Emulacja momentum/pędu: losowe, drobne wahania prędkości (człowiek nie idzie idealnie równo)
+            double currentSpeed = ThreadLocalRandom.current().nextDouble(0.06, 0.10);
             double rad = Math.toRadians(currentYaw);
             currentX -= Math.sin(rad) * currentSpeed;
             currentZ += Math.cos(rad) * currentSpeed;
 
-            // Losowe kliknięcie ręką
+            // EMULACJA FIZYKI GRAWITACJI: Oryginalny klient gry ze względu na silnik fizyczny Minecrafta
+            // wykonuje mikroskopijne drgania na osi Y (tzw. sub-pixel jitter na krawędziach bloków).
+            // Ustawiamy losowe drganie rzędu 0.0001 bloku, co oszukuje matematyczne testy GrimAC.
+            double physicsJitterY = (i % 2 == 0) ? 0.0001 : -0.0001;
+            currentY = baseHeight + physicsJitterY;
+
             if (ThreadLocalRandom.current().nextInt(100) < 5) {
                 session.send(new ServerboundSwingPacket(Hand.MAIN_HAND));
             }
 
-            sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
+            // Losowo ustawiamy flagę horizontalCollision (kolizji bocznej) na true w 2% pakietów.
+            // Prawdziwy gracz ociera się o krawędzie hitboxów, bot wysyłający ciągłe false zdradza się przed anticheatem.
+            boolean randomCollision = ThreadLocalRandom.current().nextInt(100) < 2;
+
+            sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true, randomCollision);
 
             try {
                 Thread.sleep(ThreadLocalRandom.current().nextInt(46, 54));
@@ -325,6 +315,8 @@ public class Main {
             }
         }
 
+        // Przywracamy sztywną wysokość po zakończeniu chodu
+        currentY = baseHeight;
         System.out.println("[BOT] [RUCH] Sekwencja weryfikacji zakończona pomyślnie!");
         movementFinished = true;
         isVerifying = false;
@@ -776,10 +768,10 @@ public class Main {
         return new String[]{host, "25565"};
     }
 
-    private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround) {
+    private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround, boolean horizontalCollision) {
         try {
             org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket movePacket =
-                new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket(onGround, false, x, y, z, yaw, pitch);
+                new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket(onGround, horizontalCollision, x, y, z, yaw, pitch);
             
             session.send(movePacket);
         } catch (Exception e) {
@@ -787,7 +779,7 @@ public class Main {
                 Class<?> moveClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket");
                 for (java.lang.reflect.Constructor<?> cons : moveClass.getConstructors()) {
                     if (cons.getParameterCount() == 7) {
-                        session.send((org.geysermc.mcprotocollib.network.packet.Packet) cons.newInstance(onGround, false, x, y, z, yaw, pitch));
+                        session.send((org.geysermc.mcprotocollib.network.packet.Packet) cons.newInstance(onGround, horizontalCollision, x, y, z, yaw, pitch));
                         return;
                     }
                 }
