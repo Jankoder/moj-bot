@@ -176,7 +176,6 @@ public class Main {
         try {
             int teleportId = -1;
             
-            // Szukamy metody zwracającej identyfikator teleportu (int)
             for (Method m : packet.getClass().getMethods()) {
                 if (m.getParameterCount() == 0 && (m.getReturnType() == int.class || m.getReturnType() == Integer.class)) {
                     String name = m.getName().toLowerCase();
@@ -187,25 +186,18 @@ public class Main {
                 }
             }
             
-            // Jeśli serwer przesłał prawidłowy identyfikator synchronizacji świata
             if (teleportId != -1) {
-                // 1. Natychmiast zatwierdzamy ID teleportacji na serwerze
+                // KLUCZOWE: Zawsze bezwzględnie potwierdzamy serwerowi odebranie teleportu!
+                // Poprzedni kod pomijał to w trakcie chodu, co wywoływało natychmiastowy kick.
                 sendTeleportConfirm(session, teleportId);
-                
-                // 2. Odsyłamy serwerowi pakiet zerowy (potwierdzenie stanięcia na klocku startowym lobby)
                 sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true, false);
                 
-                // 3. Uruchamiamy właściwy, chaotyczny marsz
-                // Jeśli serwer przysyła kolejny teleport (weryfikację wtórną),
-                // resetujemy stan gotowości bota, aby pętla chodu ruszyła od nowa
+                // Właściwą pętlę chodu odpalamy tylko raz, nie dublujemy wątków
                 if (!isVerifying) {
-                    movementFinished = false; // Resetujemy gotowość do kompasu
+                    movementFinished = false; 
                     isVerifying = true;
                     new Thread(() -> {
-                        try { 
-                            // Krótka pauza 150ms sieciowego czasu reakcji gracza i ruszamy
-                            Thread.sleep(150); 
-                        } catch (Exception ignored) {}
+                        try { Thread.sleep(150); } catch (Exception ignored) {}
                         if (session.isConnected()) {
                             performMovementVerification(session);
                         }
