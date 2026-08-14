@@ -196,7 +196,10 @@ public class Main {
                 sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true, false);
                 
                 // 3. Uruchamiamy właściwy, chaotyczny marsz
+                // Jeśli serwer przysyła kolejny teleport (weryfikację wtórną),
+                // resetujemy stan gotowości bota, aby pętla chodu ruszyła od nowa
                 if (!isVerifying) {
+                    movementFinished = false; // Resetujemy gotowość do kompasu
                     isVerifying = true;
                     new Thread(() -> {
                         try { 
@@ -251,7 +254,8 @@ public class Main {
                 }
                 
                 if (!session.isConnected()) return;
-                Thread.sleep(1500); // Dodatkowa sekunda naturalnej pauzy przed wyciągnięciem kompasu
+                // Zwiększamy pauzę do 3 sekund (ludzki czas na otwarcie ekwipunku)
+                Thread.sleep(3000); 
 
                 System.out.println("[BOT] Wybieram slot 4 (kompas)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
@@ -325,7 +329,7 @@ public class Main {
         currentY = baseHeight;
         System.out.println("[BOT] [RUCH] Sekwencja weryfikacji zakończona pomyślnie!");
         movementFinished = true;
-        isVerifying = false;
+        isVerifying = false; // Kluczowe czyszczenie flagi na koniec każdego marszu
     }
 
     private static void sendClientInformation(Session session) {
