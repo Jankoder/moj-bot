@@ -39,6 +39,7 @@ public class Main {
     private static volatile int activeContainerId = -1;
     private static volatile boolean resourcePackFinished = false;
     private static volatile boolean compassClicked = false;
+    private static volatile boolean movementFinished = false; // <--- Nowa flaga ruchu
     private static final AtomicInteger sequenceCounter = new AtomicInteger(0);
 
     // Pozycja i celownik bota - ustawione stałe wartości startowe
@@ -72,6 +73,7 @@ public class Main {
                 activeContainerId = -1;
                 resourcePackFinished = false;
                 compassClicked = false;
+                movementFinished = false;
                 positionReceived = true;
                 isVerifying = false;
                 lastChatMessage = "";
@@ -234,21 +236,13 @@ public class Main {
                     Thread.sleep(200);
                 }
                 
-                // Czekamy, aż ruch się zakończy (sterowane przez handlePlayerPositionPacket)
-                while (!compassClicked && session.isConnected()) {
-                    if (isVerifying) {
-                        // Jeśli ruch się wykonuje, czekamy spokojnie na jego koniec
-                        Thread.sleep(200);
-                    } else if (positionReceived) {
-                        // Jeśli pozycja została potwierdzona i ruch się zakończył - bierzemy kompas
-                        break;
-                    } else {
-                        Thread.sleep(200);
-                    }
+                // Czekamy, aż ruch się CAŁKOWICIE zakończy i anticheat zaliczy weryfikację
+                while (!movementFinished && session.isConnected()) {
+                    Thread.sleep(200);
                 }
                 
                 if (!session.isConnected()) return;
-                Thread.sleep(1000);
+                Thread.sleep(1500); // Dodatkowa sekunda naturalnej pauzy przed wyciągnięciem kompasu
 
                 System.out.println("[BOT] Wybieram slot 4 (kompas)...");
                 session.send(new ServerboundSetCarriedItemPacket(4));
@@ -314,6 +308,7 @@ public class Main {
         }
 
         System.out.println("[BOT] [RUCH] Sekwencja weryfikacji zakończona pomyślnie!");
+        movementFinished = true;
         isVerifying = false;
     }
 
