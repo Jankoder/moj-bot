@@ -39,7 +39,7 @@ public class Main {
     private static volatile int activeContainerId = -1;
     private static volatile boolean resourcePackFinished = false;
     private static volatile boolean compassClicked = false;
-    private static volatile boolean movementFinished = false; // <--- Nowa flaga ruchu
+    private static volatile boolean movementFinished = false;
     private static final AtomicInteger sequenceCounter = new AtomicInteger(0);
 
     // Pozycja i celownik bota - ustawione stałe wartości startowe
@@ -228,6 +228,24 @@ public class Main {
                 sendClientInformation(session);
                 System.out.println("[BOT] Wysyłam komendę: /login [HASŁO]");
                 session.send(new ServerboundChatCommandPacket("login " + PASSWORD));
+
+                // URUCHAMIAMY WĄTEK PODTRZYMYWANIA POZYCJI W TLE (Anty-GrimAC)
+                new Thread(() -> {
+                    System.out.println("[BOT] [ANTY-CHEAT] Uruchamiam wątek podtrzymywania obecności w świecie...");
+                    while (!isVerifying && session.isConnected()) {
+                        try {
+                            // Delikatne, mikroskopijne drganie celownika, udające oddychanie postaci
+                            currentYaw += ThreadLocalRandom.current().nextFloat(-0.02f, 0.02f);
+                            currentPitch += ThreadLocalRandom.current().nextFloat(-0.01f, 0.01f);
+                            
+                            // Wysyłamy serwerowi informację, że stabilnie stoimy na kordach z lobby
+                            sendMovePacket(session, currentX, currentY, currentZ, currentYaw, currentPitch, true);
+                            
+                            // Pakiety Vanilla lecą dokładnie co 50ms (20 ticków na sekundę)
+                            Thread.sleep(50);
+                        } catch (Exception ignored) {}
+                    }
+                }).start();
 
                 // Czekamy na obsługę resource packa
                 long startWait = System.currentTimeMillis();
