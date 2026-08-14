@@ -40,6 +40,7 @@ public class Main {
     private static volatile boolean resourcePackFinished = false;
     private static volatile boolean compassClicked = false;
     private static volatile boolean movementFinished = false;
+    private static volatile boolean loggedIn = false;
     private static final AtomicInteger sequenceCounter = new AtomicInteger(0);
 
     // Pozycja i celownik bota - ustawione stałe wartości startowe
@@ -74,6 +75,7 @@ public class Main {
                 resourcePackFinished = false;
                 compassClicked = false;
                 movementFinished = false;
+                loggedIn = false;
                 positionReceived = true;
                 isVerifying = false;
                 lastChatMessage = "";
@@ -140,6 +142,12 @@ public class Main {
                                 if (!cleanedText.isEmpty() && !cleanedText.equals(lastChatMessage)) {
                                     lastChatMessage = cleanedText;
                                     System.out.println("[BOT] [CZAT] " + cleanedText);
+                                    
+                                    // Sprawdzamy czy serwer potwierdził pomyślne wpisanie hasła
+                                    if (cleanedText.toLowerCase().contains("pomyślnie zalogowany") || cleanedText.toLowerCase().contains("zalogowano")) {
+                                        System.out.println("[BOT] [ANTY-CHEAT] Wykryto sukces logowania. Odblokowuję fizykę ruchu!");
+                                        loggedIn = true;
+                                    }
                                 }
                             }
 
@@ -173,6 +181,9 @@ public class Main {
     }
 
     private static void handlePlayerPositionPacket(Session session, Packet packet) {
+        // Blokada: ignorujemy pakiety pozycji wysyłane w fazie przed-logowania
+        if (!loggedIn) return;
+
         try {
             int teleportId = -1;
             
