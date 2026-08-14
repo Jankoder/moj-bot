@@ -768,19 +768,18 @@ public class Main {
 
     private static void sendMovePacket(Session session, double x, double y, double z, float yaw, float pitch, boolean onGround) {
         try {
-            // W nowym MCProtocolLib 1.21.1 prawidłowy konstruktor pos-rot przyjmuje kolejno:
-            // X (double), Y (double), Z (double), Yaw (float), Pitch (float), onGround (boolean)
+            // Prawidłowy konstruktor w Twojej wersji biblioteki (wersja 1.21.1) przyjmuje dokładnie poniższy układ:
             org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket movePacket =
-                new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket(x, y, z, yaw, pitch, onGround);
+                new org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket(onGround, false, x, y, z, yaw, pitch);
             
             session.send(movePacket);
         } catch (Exception e) {
-            // Gdyby klasa zmieniła nazwę, ten awaryjny blok znajdzie właściwy konstruktor
+            // Blok awaryjny na wypadek gdyby refleksja była wymagana
             try {
                 Class<?> moveClass = Class.forName("org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.player.ServerboundMovePlayerPosRotPacket");
                 for (java.lang.reflect.Constructor<?> cons : moveClass.getConstructors()) {
-                    if (cons.getParameterCount() == 6) {
-                        session.send((org.geysermc.mcprotocollib.network.packet.Packet) cons.newInstance(x, y, z, yaw, pitch, onGround));
+                    if (cons.getParameterCount() == 7) {
+                        session.send((org.geysermc.mcprotocollib.network.packet.Packet) cons.newInstance(onGround, false, x, y, z, yaw, pitch));
                         return;
                     }
                 }
